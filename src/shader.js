@@ -23,7 +23,7 @@ const vec3  WARM = vec3(1.00, 0.76, 0.50), WARM_HI = vec3(1.00, 0.92, 0.78), COO
 const vec3  GLOW = vec3(1.00, 0.62, 0.30), SKYLIGHT = vec3(0.62, 0.80, 0.86), ABSORB = vec3(2.6, 1.5, 1.2);
 const float FLOOR_Y = -0.66, CAM_D = 3.2, DEPTH = 0.11, OPEN = 0.285, ARCH_Y = 0.13, FILLET = 0.03;
 const vec2  OUTER = vec2(0.37, 0.50);
-const vec3  LAMP = vec3(0.0, -0.08, -1.7), CONE_AXIS = vec3(0.0, 0.1390, 0.9903), SPILL_AXIS = vec3(0.0, -0.2588, 0.9659);
+const vec3  LAMP = vec3(0.0, -0.08, -1.7), CONE_AXIS = vec3(0.0, 0.0872, 0.9962), SPILL_AXIS = vec3(0.0, -0.2588, 0.9659);
 
 mat2  rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -236,7 +236,7 @@ void main() {
   vec3 oc = ro - vec3(0.0, doorY(), 0.0);
   float b = dot(oc, rd);
   if (b * b - dot(oc, oc) + 0.49 > 0.0) {
-    int taps = u_quality > 0.5 ? 4 : 2;
+    const int taps = 4;
     vec4 sum = vec4(0.0); float tNear = 1e9;
     for (int s = 0; s < 4; s++) {
       if (s >= taps) break;

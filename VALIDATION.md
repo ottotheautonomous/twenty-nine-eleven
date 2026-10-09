@@ -1,23 +1,19 @@
 # Verification — 9 October 2026
 
-The visitor-responsive revision grounds the identity in the owner's Jeremiah 29:11 and helping-people brief. Prior versions remain in Git history.
+The Threshold revision replaces the tape field and shelter mark with a raymarched smoked-glass doorway, dawn behind it and a floor plan beneath it. It was planned and reviewed by Claude Fable and implemented by Claude Opus. Prior versions remain in Git history.
 
-The typography refinement adds Motion-controlled letter waves, group scale, warm light, a drawing underline and responsive separator dots. Native hover produced a roughly 3.6px letter translation and 0.9 underline opacity; the label hit-area rectangle remained unchanged. Pause normalized character/group transforms; re-enable refreshes the active state. The final 320px rows measure approximately 279px each at 11px type, without page overflow. Canonical control and input names remain intact. A local fixture confirmed accessible Sending/Send message labels rebuild through a failed submission while retaining the draft. Responsive full/short variants and hidden-state resets were reviewed independently.
-
-- Production frontend build: passed.
-- Worker packaging dry-run: passed; not deployed.
+- Production frontend build: passed. One JS bundle, about 100 kB (36 kB gzip). No new dependencies; `motion/three` ships with the installed `motion`.
 - Backend tests: 18 passed, using stubbed email delivery. No test email sent.
-- Desktop and 320×568 mobile inspected for this revision. No horizontal overflow. Both capability rows stay on one line, including Design. The existing short-screen modal behavior remains intact.
-- Native dialog checks passed: first-field focus, forward/backward keyboard wrapping, Escape, close button, genuine backdrop dismissal, and focus restoration.
-- Contact checks against a local fixture passed: validation, provider failure, retained draft, rate limiting, disabled pending fields, close/reopen during a pending request, confirmed success and new-message reset.
-- Real native pointer drag verified: page input was `mouse`, normalized focus updated, sculpture camera changed and the wordmark received depth response. Keyboard focus updated the same shared scene positions.
-- Capability controls opened relevant enquiries and prefilled only empty drafts. Choosing another topic preserved an existing draft. Dismissal restored focus to the chosen capability. Keyboard containment passed.
-- The arbitrary turbine/hourglass was replaced by two open protective structures, dawn and a path. There are no autonomous rotation/spinner loops in the new scene. Engagement controls symmetric opening and light.
-- Pause stopped the field and reset both shelter transforms to `none`; resuming restored policy correctly. Source review covered touch handlers, reduced geometry, safe color feedback, activity gating and Motion's cached hover transform resets.
-- The actual in-app browser uses Canvas2D. Its six smooth shaded surfaces, continuous highlights and reading recess were visually inspected. WebGL2 compilation and renderer lifecycle were checked independently; backing resolution remains capped at 2.8 million pixels.
-- Independent source review completed for animation races, reduced-motion startup and preference changes, pending requests and focus behavior. Success-reveal controls participate in live reduced-motion cleanup.
-- Font assets and Motion bundled locally. No runtime third-party font requests.
+- Form validation, payload, submission, success/error copy and "Send another" are byte-identical to the previous revision. Dialog markup is unchanged.
+- Every scene input is a uniform written by Motion (`threeEffect` on a bare uniforms object); the render loop runs on Motion's `frame.render`. No `requestAnimationFrame` in the source.
+- WebGL2 renders were inspected at 1440×900, 390×844 and 320×568 through SwiftShader: door centred on its DOM anchor, warm light only through the opening, ink room, the grid limited to the door's surroundings, no horizontal overflow, both capability rows on one line.
+- Pointer: the camera orbits on a heavy spring, the glass glint and floor pool follow, and the wordmark parallaxes opposite. Hover and focus brighten the dawn through `u_engage`. A press sends a pulse through the door.
+- Modal: the panel grows from the door, the camera dollies back and the dawn dims; the loop stops once the panel has settled. Native dialog focus, Escape, backdrop dismissal and focus restoration were rechecked.
+- Fallbacks were forced in a test browser: without WebGL the Canvas2D renderer projects the same door, opening, shaft and grid; without any canvas the inline still door and a CSS glow are shown and the pause control is hidden. The real in-app browser (no WebGL) uses the Canvas2D path.
+- Reduced motion: no entrance, idle drift, camera motion or pulse; one composed still frame with final uniform values; the pause control is hidden. Pause stops the loop, idle drift and pulse, and resumes cleanly.
+- Keyboard: tab order runs through the capabilities and contact control; focus rings are warm and visible on the dark floor.
+- The WebGL1 path is a source translation of the same shader. It compiles in code review but was not exercised on hardware.
 
-The user's existing Igloo reference tab reported that WebGL2 was unavailable. Its full 3D experience could not be inspected here; this page's Canvas2D path was inspected directly. This is a verification limit, not a claimed quality comparison.
+**Not yet measured on real GPUs.** SwiftShader screenshots verify the image, not the frame rate. Open the site with `?debug` on a typical laptop and phone: expect about 60 fps at a backing scale of 1.0 or more on desktop. The adaptive governor lowers resolution if frames run long.
 
 **Live email delivery remains unverified.** Cloudflare authentication, destination verification and domain onboarding must be completed, followed by an authorized real enquiry and inbox readback. The visible website and email delivery have separate deployment states.

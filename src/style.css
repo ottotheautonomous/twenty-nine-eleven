@@ -61,7 +61,7 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .contact-rule { position: absolute; bottom: 2px; left: 0; right: 0; height: 1px; background: var(--dawn); opacity: .7; transform: scaleX(.3); transform-origin: center; }
 
 .verse { margin: 28px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.6; letter-spacing: .02em; color: var(--muted); }
-.verse-reference { margin-left: 12px; color: #7b908b; }
+.verse-reference { margin-left: 12px; color: var(--muted); }
 .no-script { font: 11px 'IBM Plex Mono', monospace; color: var(--muted); margin-top: 18px; }
 
 .motion-toggle { position: fixed; z-index: 3; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: 36px; height: 36px; padding: 9px; border: 1px solid #ffffff1f; border-radius: 50%; background: #0a1113cc; color: #9fb3ae; opacity: .6; }

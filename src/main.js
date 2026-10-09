@@ -301,7 +301,7 @@ function openContact(origin = trigger) {
   if (reducedMotion.matches) {
     surface.style.transform = 'none'; surface.style.opacity = '1';
     document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
-    scene.style.opacity = '.22'; veil.style.opacity = '.6'; setScenery(1);
+    scene.style.opacity = '.22'; veil.style.opacity = '.5'; setScenery(1);
     modalState = 'open'; updateAmbient(); return;
   }
   const scenery = paused ? (setScenery(1), []) : [
@@ -311,7 +311,7 @@ function openContact(origin = trigger) {
   const panel = animate(surface, { transform: wasClosed ? [doorTransform(), 'translate(0px, 0px) scale(1)'] : 'translate(0px, 0px) scale(1)' }, { type: 'spring', visualDuration: .6, bounce: .05 });
   modalAnimations.push(panel, ...scenery,
     animate(surface, { opacity: wasClosed ? [0, 1] : 1 }, { duration: .3, ease }),
-    animate(veil, { opacity: .6 }, { duration: .35 }),
+    animate(veil, { opacity: .5 }, { duration: .35 }),
     animate(scene, { opacity: .22 }, { duration: .35, ease }),
     animate(document.querySelectorAll('.dialog-item'), { opacity: [0, 1], y: [9, 0] }, { duration: .36, ease, delay: stagger(.035, { startDelay: .18 }) }),
   );
@@ -370,7 +370,7 @@ reducedMotion.addEventListener('change', () => {
     else if (dialog.open) {
       surface.style.transform = 'none'; surface.style.opacity = '1';
       document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
-      scene.style.opacity = '.22'; veil.style.opacity = '.6'; setScenery(1); modalState = 'open';
+      scene.style.opacity = '.22'; veil.style.opacity = '.5'; setScenery(1); modalState = 'open';
     }
     entered = true;
   } else armIdle();
