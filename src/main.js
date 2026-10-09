@@ -2,6 +2,7 @@ import './style.css';
 import { animate, stagger, hover, springValue, styleEffect } from 'motion';
 import { cipherMarkup } from './cipher.js';
 import { createBackground } from './background.js';
+import { createTextMotion } from './text-motion.js';
 
 const $ = selector => document.querySelector(selector);
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -24,7 +25,6 @@ const buttonLabel = $('.button-label');
 const endpoint = import.meta.env.VITE_CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact';
 const ambient = [];
 const entrance = [];
-const serviceMotion = new Map();
 let successAnimations = [];
 let modalAnimations = [];
 let modalState = 'closed';
@@ -38,6 +38,9 @@ let pointerIntent = 0;
 let focusIntent = 0;
 let pointerElement = null;
 const ease = [0.22, 1, 0.36, 1];
+const textFeedback = createTextMotion(document.querySelectorAll('.service-control, .purpose, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
+  canAnimate: () => !reducedMotion.matches && !paused,
+});
 const spring = { stiffness: 95, damping: 23 };
 const pointerX = springValue(0, spring);
 const pointerY = springValue(0, spring);
@@ -227,20 +230,9 @@ trigger.addEventListener('focus', () => highlightContact(true));
 trigger.addEventListener('blur', () => highlightContact(false));
 
 function resetServiceMotion() {
-  serviceMotion.forEach(control => control.stop()); serviceMotion.clear();
-  document.querySelectorAll('.service-control').forEach(button => { serviceMotion.set(button, setImmediateMotion(button, { y: 0 })); });
+  if (paused || reducedMotion.matches) textFeedback.reset(); else textFeedback.refresh();
 }
 for (const button of document.querySelectorAll('.service-control')) {
-  hover(button, () => {
-    if (reducedMotion.matches || paused) return;
-    serviceMotion.get(button)?.stop();
-    serviceMotion.set(button, animate(button, { y: -1.5 }, { type: 'spring', stiffness: 240, damping: 25 }));
-    return () => {
-      serviceMotion.get(button)?.stop();
-      if (reducedMotion.matches || paused) { serviceMotion.set(button, setImmediateMotion(button, { y: 0 })); return; }
-      serviceMotion.set(button, animate(button, { y: 0 }, { type: 'spring', stiffness: 240, damping: 25 }));
-    };
-  });
   button.addEventListener('click', () => {
     if (!submitting && !form.elements.message.value.trim() && success.hidden) {
       form.elements.message.value = `I'm interested in ${button.dataset.service}.\n\n`;
@@ -248,6 +240,7 @@ for (const button of document.querySelectorAll('.service-control')) {
     openContact(button);
   });
 }
+window.addEventListener('resize', () => textFeedback.refresh(), { passive: true });
 
 function stopModalAnimations() { modalAnimations.forEach(control => control.stop()); modalAnimations = []; }
 function collapsedTransform() {
@@ -332,7 +325,7 @@ reducedMotion.addEventListener('change', () => {
     }
     entered = true;
   } else { startAmbient(); }
-  updateAmbient(); refreshIntent(); updateIntent(engagement.get());
+  updateAmbient(); refreshIntent(); updateIntent(engagement.get()); resetServiceMotion();
 });
 
 const fields = ['name', 'email', 'message'].map(name => form.elements.namedItem(name));
@@ -352,7 +345,7 @@ form.addEventListener('submit', async event => {
   const validity = fields.map(validate); const invalid = validity.indexOf(false);
   if (invalid !== -1) { fields[invalid].focus(); return; }
   const payload = { name: fields[0].value.trim(), email: fields[1].value.trim(), message: fields[2].value.trim(), website: form.elements.website.value, requestId };
-  submitting = true; fieldset.disabled = true; buttonLabel.textContent = 'Sending…'; status.textContent = ''; status.classList.remove('is-error'); form.setAttribute('aria-busy', 'true');
+  submitting = true; fieldset.disabled = true; textFeedback.setText(buttonLabel, 'Sending…'); status.textContent = ''; status.classList.remove('is-error'); form.setAttribute('aria-busy', 'true');
   try {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15000), credentials: 'omit' });
     const result = await response.json().catch(() => null);
@@ -374,7 +367,7 @@ form.addEventListener('submit', async event => {
       ? 'Delivery is taking longer than expected. Please try again shortly. Your message is still here.'
       : error instanceof TypeError ? 'We could not reach the contact service. Please try again shortly. Your message is still here.' : error.message;
     status.classList.add('is-error');
-  } finally { submitting = false; fieldset.disabled = false; buttonLabel.textContent = 'Send message'; form.removeAttribute('aria-busy'); }
+  } finally { submitting = false; fieldset.disabled = false; textFeedback.setText(buttonLabel, 'Send message'); form.removeAttribute('aria-busy'); }
 });
 $('#send-another').addEventListener('click', () => {
   requestId = crypto.randomUUID(); form.reset(); fields.forEach(field => field.removeAttribute('aria-invalid'));

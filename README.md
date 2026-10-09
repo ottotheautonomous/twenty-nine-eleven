@@ -45,6 +45,7 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 - `index.html`: company copy, services and form labels.
 - `src/style.css`: composition, type and color.
 - `src/main.js`: continuous Motion, dialog transitions, validation and submission states.
+- `src/text-motion.js`: per-letter Motion waves, label illumination, underlines and separator feedback.
 - `src/cipher.js`: authored shelter, dawn/path geometry and favicon.
 - `src/background.js`: viewport surface field, WebGL/Canvas rendering and activity controls.
 - `wrangler.jsonc`: email destination restrictions, endpoint and allowed origins.
@@ -55,3 +56,5 @@ Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SI
 The whole viewport renders a continuous folded surface field, using WebGL2 when available and shaded Canvas2D ribbons otherwise. Motion-smoothed pointer and touch position bend its geometry, shift localized reflections and release a restrained tap impulse. Keyboard focus gives equivalent lighting/intent feedback. Backing resolution is capped at 2.8 million pixels. Pause/reduced motion stop spatial and ambient animation while retaining immediate color feedback. Ambient motion also pauses while contact is open or the tab is hidden. Touch scrolling is preserved. Compact labels keep each capability row on one line on mobile.
 
 Each capability label can open the native contact dialog from that control and prefill an empty message with the chosen topic. Existing drafts are preserved. The dialog traps keyboard focus and restores it to the originating control. Drafts and pending requests survive closing/reopening. Browser checks use a local email fixture; the real backend activation remains separate.
+
+Capability text has a visible, short Motion wave: letters lift 3.6px on desktop (2.2px on mobile), brighten, and scale as a group; a fine rule reveals beneath the label and adjacent separators illuminate. The stagger is capped at 100ms. The hit areas and rows remain stationary. Hover, keyboard focus and touch share the same state; pause/reduced motion keep immediate light feedback without spatial animation. Supporting copy, headings and form labels have matching text responses. Canonical accessible text stays unsplit, including Sending/Send message changes.

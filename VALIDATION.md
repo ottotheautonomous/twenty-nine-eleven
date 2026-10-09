@@ -2,6 +2,8 @@
 
 The visitor-responsive revision grounds the identity in the owner's Jeremiah 29:11 and helping-people brief. Prior versions remain in Git history.
 
+The typography refinement adds Motion-controlled letter waves, group scale, warm light, a drawing underline and responsive separator dots. Native hover produced a roughly 3.6px letter translation and 0.9 underline opacity; the label hit-area rectangle remained unchanged. Pause normalized character/group transforms; re-enable refreshes the active state. The final 320px rows measure approximately 279px each at 11px type, without page overflow. Canonical control and input names remain intact. A local fixture confirmed accessible Sending/Send message labels rebuild through a failed submission while retaining the draft. Responsive full/short variants and hidden-state resets were reviewed independently.
+
 - Production frontend build: passed.
 - Worker packaging dry-run: passed; not deployed.
 - Backend tests: 18 passed, using stubbed email delivery. No test email sent.
