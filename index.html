@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f1e9" />
+    <meta name="description" content="Twenty Nine Eleven. Security and bespoke systems. Penetration testing, networks, access control, cameras, and considered technology." />
+    <meta property="og:title" content="Twenty Nine Eleven — Security & bespoke systems" />
+    <meta property="og:description" content="Security, networks, access control, cameras, and bespoke technology. Start a conversation." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/mark.svg" />
+    <title>Twenty Nine Eleven — Security & bespoke systems</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#contact">Skip to contact</a>
+    <div class="page">
+      <header class="header" data-enter>
+        <p class="work-type">Security <span class="amp">&</span> bespoke systems</p>
+        <a class="contact-link" href="#contact">Contact <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12" /></svg></a>
+      </header>
+
+      <main class="main">
+        <div class="identity" aria-labelledby="company-name">
+          <div class="sigil" aria-hidden="true">
+            <svg viewBox="0 0 120 120" fill="none">
+              <circle cx="60" cy="60" r="37" />
+              <path d="M60 4v29M60 87v29M4 60h19M97 60h19" />
+              <ellipse cx="60" cy="60" rx="16" ry="37" transform="rotate(29 60 60)" />
+              <circle class="sigil-point" cx="60" cy="60" r="2" />
+            </svg>
+          </div>
+          <h1 id="company-name" aria-label="Twenty Nine Eleven">
+            <span class="word-mask"><span class="word">twenty nine</span></span>
+            <span class="word-mask"><span class="word word-italic">eleven<span class="period">.</span></span></span>
+          </h1>
+          <span class="identity-coordinate" aria-hidden="true" data-enter>XXIX <span>/</span> XI</span>
+        </div>
+
+        <section class="contact" id="contact" aria-labelledby="contact-title" data-enter>
+          <div class="contact-heading">
+            <h2 id="contact-title">Contact</h2>
+            <p class="email-address">contact@twentynineeleven.net</p>
+          </div>
+          <form id="contact-form" method="post" action="https://contact.twentynineeleven.net/api/contact" novalidate>
+            <div class="field">
+              <label for="name">Your name</label>
+              <input id="name" name="name" type="text" autocomplete="name" required maxlength="120" aria-describedby="name-error" />
+              <span class="field-error" id="name-error"></span>
+            </div>
+            <div class="field">
+              <label for="email">Email address</label>
+              <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required maxlength="254" aria-describedby="email-error" />
+              <span class="field-error" id="email-error"></span>
+            </div>
+            <div class="field field-message">
+              <label for="message">What do you have in mind?</label>
+              <textarea id="message" name="message" required minlength="10" maxlength="5000" rows="3" aria-describedby="message-error"></textarea>
+              <span class="field-error" id="message-error"></span>
+            </div>
+            <div class="honeypot" aria-hidden="true" inert>
+              <label for="website">Leave this field empty</label>
+              <input id="website" name="website" autocomplete="off" tabindex="-1" />
+            </div>
+            <div class="form-action">
+              <button class="send-button" type="submit" disabled><span class="button-label">Send enquiry</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 5l7 7-7 7" /></svg></button>
+            </div>
+            <p class="form-status" id="form-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          </form>
+          <div class="success" id="success" hidden tabindex="-1">
+            <svg class="success-mark" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="m14 24 7 7 13-14" /></svg>
+            <h3>Thank you.</h3>
+            <p>Your enquiry is with us.</p>
+            <button id="send-another" class="text-button" type="button">Send another enquiry <span aria-hidden="true">↗</span></button>
+          </div>
+          <noscript><p class="no-script">Please enable JavaScript to send an enquiry.</p></noscript>
+        </section>
+      </main>
+
+      <div class="services" aria-label="Our work" data-enter>
+        <ul>
+          <li>Penetration testing</li>
+          <li>Networks</li>
+          <li>Access control</li>
+          <li>Cameras</li>
+          <li>Bespoke technology</li>
+        </ul>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

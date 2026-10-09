@@ -1,0 +1,28 @@
+{
+  "name": "twenty-nine-eleven",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "node --test worker/contact.test.mjs",
+    "contact:check": "wrangler deploy --dry-run --outdir worker/.dry-run",
+    "contact:login": "wrangler login",
+    "contact:deploy": "wrangler deploy",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@fontsource/cormorant-garamond": "5.3.0",
+    "@fontsource/manrope": "5.3.0",
+    "motion": "14.0.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.4",
+    "wrangler": "4.149.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
