@@ -1,8 +1,8 @@
 # twenty nine eleven
 
-A centered single page for security and bespoke technology. An open architectural shelter frames a path toward dawn, surrounded by a visitor-responsive surface field. Self-hosted typography and [Motion](https://motion.dev/) springs connect the artwork, lettering, capability controls and contact modal. Two capability rows. No header or footer.
+A centered single page for security and bespoke technology. A hovering smoked-glass doorway stands in a dark room with dawn behind it; the light pours through the opening onto a faint floor plan where the name rests. The camera, light, glass and grid answer pointer, touch and keyboard focus. Every scene input is a [Motion](https://motion.dev/) value, and the render loop runs on Motion's frame scheduler. Two capability rows. No header or footer.
 
-The scene is a design interpretation of the owner's Jeremiah 29:11 naming and helping-people brief: supportive protection, hope and a way forward. The quiet “Hope & a future” reference draws from [Jeremiah 29:11](https://www.biblegateway.com/passage/?search=Jeremiah+29%3A11&version=NIV). It expresses the supplied values without adding other beliefs or promises.
+The door is a design interpretation of the owner's Jeremiah 29:11 naming and helping-people brief: a door that security guards and bespoke technology opens, with the future already lit behind it. The closing colophon, “Plans for hope and a future”, references [Jeremiah 29:11](https://www.biblegateway.com/passage/?search=Jeremiah+29%3A11&version=NIV). It expresses the supplied values without adding other beliefs or promises.
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
@@ -42,19 +42,12 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 
 ## Adjust
 
-- `index.html`: company copy, services and form labels.
-- `src/style.css`: composition, type and color.
-- `src/main.js`: continuous Motion, dialog transitions, validation and submission states.
+- `index.html`: company copy, services, form labels and the still door used without a renderer.
+- `src/style.css`: composition, type scale, color tokens and fallback states.
+- `src/main.js`: entrance sequence, pointer/touch/keyboard/idle response, pause, the through-the-door modal, validation and submission.
+- `src/scene-state.js`: the shader uniforms and the Motion springs bound to them.
+- `src/shader.js`: the raymarched door, floor plan, dawn and light shaft (GLSL).
+- `src/threshold.js`: WebGL2/WebGL1 renderer, the Canvas2D projection of the same scene, resolution budget and the Motion frame loop.
 - `src/text-motion.js`: per-letter Motion waves, label illumination, underlines and separator feedback.
-- `src/cipher.js`: authored shelter, dawn/path geometry and favicon.
-- `src/background.js`: viewport surface field, WebGL/Canvas rendering and activity controls.
-- `wrangler.jsonc`: email destination restrictions, endpoint and allowed origins.
-- [worker/README.md](worker/README.md): backend details, prerequisites and limitations.
 
-Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. The sculpture stays grounded while its protective shoulders part slightly, its dawn/path light responds to intent, and the shared camera reacts to the visitor. Typography receives the same moving light and restrained depth response.
-
-The whole viewport renders a continuous folded surface field, using WebGL2 when available and shaded Canvas2D ribbons otherwise. Motion-smoothed pointer and touch position bend its geometry, shift localized reflections and release a restrained tap impulse. Keyboard focus gives equivalent lighting/intent feedback. Backing resolution is capped at 2.8 million pixels. Pause/reduced motion stop spatial and ambient animation while retaining immediate color feedback. Ambient motion also pauses while contact is open or the tab is hidden. Touch scrolling is preserved. Compact labels keep each capability row on one line on mobile.
-
-Each capability label can open the native contact dialog from that control and prefill an empty message with the chosen topic. Existing drafts are preserved. The dialog traps keyboard focus and restores it to the originating control. Drafts and pending requests survive closing/reopening. Browser checks use a local email fixture; the real backend activation remains separate.
-
-Capability text has a visible, short Motion wave: letters lift 3.6px on desktop (2.2px on mobile), brighten, and scale as a group; a fine rule reveals beneath the label and adjacent separators illuminate. The stagger is capped at 100ms. The hit areas and rows remain stationary. Hover, keyboard focus and touch share the same state; pause/reduced motion keep immediate light feedback without spatial animation. Supporting copy, headings and form labels have matching text responses. Canonical accessible text stays unsplit, including Sending/Send message changes.
+Append `?debug` to show the renderer, frame rate and backing scale; `?debug=1` to `4` show door coverage, the door's light mask, the haze and the floor alone.

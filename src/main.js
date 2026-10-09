@@ -373,7 +373,7 @@ reducedMotion.addEventListener('change', () => {
       scene.style.opacity = '.22'; veil.style.opacity = '.6'; setScenery(1); modalState = 'open';
     }
     entered = true;
-  } else noteActivity();
+  } else armIdle();
   applyMotionPolicy();
 });
 

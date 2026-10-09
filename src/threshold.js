@@ -114,7 +114,7 @@ function createCanvasRenderer(canvas, uniforms) {
     lost: () => false,
     draw(view) {
       const W = canvas.width, H = canvas.height, motion = u('u_motion');
-      const yaw = (u('u_yaw') + u('u_idle') * 0.06 * Math.sin(view.time * 0.37)) * motion;
+      const yaw = -0.035 + (u('u_yaw') + u('u_idle') * 0.06 * Math.sin(view.time * 0.37)) * motion;
       const pitch = -0.10 + (u('u_pitch') + u('u_idle') * 0.03 * Math.sin(view.time * 0.23 + 1)) * motion;
       const dist = CAM_D + 0.6 * u('u_dolly');
       const target = [0, -0.02, 0];
@@ -128,19 +128,19 @@ function createCanvasRenderer(canvas, uniforms) {
         return [view.anchorX + (dot(d, right) / z) * focal * half, view.anchorY - (dot(d, up) / z) * focal * half, z];
       };
       const path = points => { ctx.beginPath(); points.forEach((p, i) => { const [x, y] = project(p); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); };
-      const dawn = u('u_dawn') * (1 - 0.6 * u('u_dim')) * (1 + 0.35 * u('u_engage'));
+      const dawn = u('u_dawn') * (1 - 0.6 * u('u_dim')) * (1 + 0.5 * u('u_engage'));
       const dy = (u('u_rise') - 1) * 0.35, reveal = u('u_reveal');
       const lamp = project(LAMP), px = lamp[0], py = lamp[1];
 
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
-      ctx.fillStyle = '#0b0f12'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#070c10'; ctx.fillRect(0, 0, W, H);
       const horizon = project([0, FLOOR_Y, -40])[1];
       ctx.globalCompositeOperation = 'lighter';
       // The plan: grid revealed by the lamp pool in front of the door and the visitor light.
       const pool = project([0, FLOOR_Y, 0.9]), visitor = project([u('u_lightX'), FLOOR_Y, 1.15]);
       const reach = u('u_plan');
       const gridGlow = ctx.createRadialGradient(pool[0], pool[1], 0, pool[0], pool[1], Math.max(W, H) * 0.55 * Math.max(reach, 0.01));
-      gridGlow.addColorStop(0, `rgba(140,200,194,${0.05 + 0.10 * dawn})`); gridGlow.addColorStop(0.5, 'rgba(140,200,194,0.035)'); gridGlow.addColorStop(1, 'rgba(140,200,194,0)');
+      gridGlow.addColorStop(0, `rgba(140,200,194,${0.03 + 0.05 * dawn})`); gridGlow.addColorStop(0.5, 'rgba(140,200,194,0.015)'); gridGlow.addColorStop(1, 'rgba(140,200,194,0)');
       ctx.strokeStyle = gridGlow; ctx.lineWidth = Math.max(1, H / 900);
       ctx.beginPath();
       const line = (a, b) => {
@@ -150,18 +150,18 @@ function createCanvasRenderer(canvas, uniforms) {
         if (zb < 0.3) { const t = (0.3 - zb) / (za - zb); b = [b[0] + (a[0] - b[0]) * t, b[1], b[2] + (a[2] - b[2]) * t]; }
         const pa = project(a), pb = project(b); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]);
       };
-      for (let x = -3; x <= 3.001; x += 0.25) line([x, FLOOR_Y, -6], [x, FLOOR_Y, 3]);
-      for (let z = -6; z <= 3.001; z += 0.25) line([-3, FLOOR_Y, z], [3, FLOOR_Y, z]);
+      for (let x = -2.5; x <= 2.501; x += 0.25) line([x, FLOOR_Y, -3.5], [x, FLOOR_Y, 2.5]);
+      for (let z = -3.5; z <= 2.501; z += 0.25) line([-2.5, FLOOR_Y, z], [2.5, FLOOR_Y, z]);
       ctx.stroke();
       // Fog hides the far grid toward the horizon.
       ctx.globalCompositeOperation = 'source-over';
       const fog = ctx.createLinearGradient(0, horizon, 0, horizon + H * 0.1);
-      fog.addColorStop(0, 'rgba(11,15,18,1)'); fog.addColorStop(1, 'rgba(11,15,18,0)');
+      fog.addColorStop(0, 'rgba(7,12,16,1)'); fog.addColorStop(1, 'rgba(7,12,16,0)');
       ctx.fillStyle = fog; ctx.fillRect(0, horizon - 1, W, H * 0.1 + 1);
       ctx.globalCompositeOperation = 'lighter';
       // Horizon glow.
       const band = ctx.createLinearGradient(0, horizon - H * 0.12, 0, horizon + H * 0.05);
-      band.addColorStop(0, 'rgba(255,190,120,0)'); band.addColorStop(0.7, `rgba(255,190,120,${0.04 * dawn})`); band.addColorStop(1, 'rgba(255,190,120,0)');
+      band.addColorStop(0, 'rgba(255,190,120,0)'); band.addColorStop(0.7, `rgba(255,190,120,${0.025 * dawn})`); band.addColorStop(1, 'rgba(255,190,120,0)');
       ctx.fillStyle = band; ctx.fillRect(0, horizon - H * 0.12, W, H * 0.17);
       // Visitor light on the floor.
       const vr = H * 0.32;
@@ -170,11 +170,21 @@ function createCanvasRenderer(canvas, uniforms) {
         vg.addColorStop(0, 'rgba(140,215,208,0.05)'); vg.addColorStop(1, 'rgba(140,215,208,0)');
         ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
       }
-      // Halo behind the door: the dawn seen around and through it.
-      const haloR = view.anchorH * 1.4;
+      // A faint rim of dawn around the frame; the dawn itself is seen through the opening.
+      const haloR = view.anchorH * 1.1;
       const halo = ctx.createRadialGradient(px, py, 0, px, py, haloR);
-      halo.addColorStop(0, `rgba(255,228,186,${0.55 * dawn})`); halo.addColorStop(0.18, `rgba(255,200,140,${0.16 * dawn})`); halo.addColorStop(1, 'rgba(255,190,120,0)');
+      halo.addColorStop(0, `rgba(255,214,160,${0.12 * dawn})`); halo.addColorStop(1, 'rgba(255,190,120,0)');
       ctx.fillStyle = halo; ctx.fillRect(px - haloR, py - haloR, haloR * 2, haloR * 2);
+      ctx.save(); path(opening(0, dy)); ctx.clip();
+      const sun = ctx.createRadialGradient(px, py, 0, px, py, view.anchorH * 0.62);
+      sun.addColorStop(0, `rgba(255,232,190,${0.95 * dawn})`); sun.addColorStop(0.45, `rgba(232,182,120,${0.62 * dawn})`); sun.addColorStop(1, `rgba(150,104,60,${0.38 * dawn})`);
+      ctx.fillStyle = sun; ctx.fillRect(0, 0, W, H);
+      // The dark floor meeting the dawn: a horizon inside the doorway.
+      ctx.globalCompositeOperation = 'source-over';
+      const ground = ctx.createLinearGradient(0, horizon, 0, horizon + view.anchorH * 0.08);
+      ground.addColorStop(0, 'rgba(12,14,15,0.96)'); ground.addColorStop(1, 'rgba(18,17,15,0.9)');
+      ctx.fillStyle = ground; ctx.fillRect(0, horizon, W, H - horizon);
+      ctx.restore(); ctx.globalCompositeOperation = 'lighter';
       // The shaft: the opening projected from the lamp toward the viewer.
       const slice = opening(0, dy);
       for (let i = 0; i < 12; i++) {
@@ -202,7 +212,13 @@ function createCanvasRenderer(canvas, uniforms) {
       ctx.save(); ctx.translate(foot[0], foot[1]); ctx.scale(1, 0.18); ctx.translate(-foot[0], -foot[1]);
       ctx.fillStyle = shadow; ctx.fillRect(foot[0] - view.anchorH, foot[1] - view.anchorH, view.anchorH * 2, view.anchorH * 2); ctx.restore();
 
-      // The door: inner reveal faces, then the smoked-glass front face.
+      // The door: an outer side face when the camera sees it, inner reveal faces, then the smoked-glass front face.
+      const [halfW, halfH] = OUTER;
+      if (Math.abs(ro[0]) > halfW) {
+        const sx = Math.sign(ro[0]) * halfW;
+        path([[sx, -halfH + dy, DEPTH], [sx, halfH + dy, DEPTH], [sx, halfH + dy, -DEPTH], [sx, -halfH + dy, -DEPTH]]);
+        ctx.fillStyle = `rgba(20,32,36,${0.9 * reveal})`; ctx.fill();
+      }
       const front = opening(DEPTH, dy), back = opening(-DEPTH, dy);
       for (let i = 0; i < front.length - 1; i++) {
         path([front[i], front[i + 1], back[i + 1], back[i]]);
@@ -257,7 +273,7 @@ export function createThreshold(canvas, anchorEl, uniforms, { debug = 0, readout
     mobile = innerWidth <= 700 || coarse.matches;
     view.quality = mobile ? 0 : 1;
     const { w, h, max } = budget();
-    cap = Math.min(devicePixelRatio || 1, mobile ? 1.5 : 1.25, max);
+    cap = Math.min(devicePixelRatio || 1, mobile ? 1.75 : 1.25, max);
     scale = Math.min(scale, cap);
     if (!governed()) scale = cap;
     const width = Math.max(1, Math.round(w * scale)), height = Math.max(1, Math.round(h * scale));
