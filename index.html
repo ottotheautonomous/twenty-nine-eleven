@@ -4,14 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#080c0b" />
-  <meta name="description" content="Twenty Nine Eleven. Security and bespoke technology. Penetration testing, networks, access control and cameras." />
+  <meta name="description" content="Twenty Nine Eleven. Security, networks, access control and cameras. CNC, fabrication, applied AI, computer vision, software, creative production and design." />
   <meta property="og:title" content="Twenty Nine Eleven — Security & bespoke technology" />
-  <meta property="og:description" content="Security, networks, access control, cameras and bespoke technology. Start a conversation." />
+  <meta property="og:description" content="Security and bespoke technology. CNC, fabrication, AI, software, creative production and design. Start a conversation." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="/mark.svg" />
   <title>Twenty Nine Eleven — Security & bespoke technology</title>
 </head>
 <body>
+  <canvas id="world" class="world" aria-hidden="true"></canvas>
   <main class="scene" aria-labelledby="company-name">
     <div class="stage">
       <div class="cipher-object">
@@ -26,11 +27,20 @@
         <span class="name-mask"><span class="name-line name-second">ELEVEN</span></span>
       </h1>
       <p class="work-type" data-enter>Security <span>&</span> bespoke technology</p>
-      <ul class="services" aria-label="Our work" data-enter>
+      <ul class="services" aria-label="Security and infrastructure" data-enter>
         <li><span class="service-full">Penetration testing</span><span class="service-short">Pentesting</span></li>
         <li>Networks</li>
         <li><span class="service-full">Access control</span><span class="service-short">Access</span></li>
         <li>Cameras</li>
+      </ul>
+      <ul class="services services-secondary" aria-label="Fabrication, intelligence and creative work" data-enter>
+        <li>CNC</li>
+        <li><span class="service-full">Fabrication</span><span class="service-short">Fab</span></li>
+        <li><span class="service-full">Applied AI</span><span class="service-short">AI</span></li>
+        <li><span class="service-full">Computer vision</span><span class="service-short">Vision</span></li>
+        <li><span class="service-full">Software</span><span class="service-short">Code</span></li>
+        <li><span class="service-full">Creative production</span><span class="service-short">Media</span></li>
+        <li>Design</li>
       </ul>
       <div class="contact-trigger-shell" data-enter>
         <button id="open-contact" class="contact-trigger" type="button" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>

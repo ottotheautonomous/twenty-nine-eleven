@@ -1,12 +1,15 @@
 import './style.css';
 import { animate, stagger, hover, springValue, styleEffect } from 'motion';
 import { cipherMarkup } from './cipher.js';
+import { createBackground } from './background.js';
 
 const $ = selector => document.querySelector(selector);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const finePointer = matchMedia('(hover: hover) and (pointer: fine)');
 const scene = $('.scene');
 $('#cipher').innerHTML = cipherMarkup;
+const background = createBackground($('#world'));
+background.setReducedMotion(reducedMotion.matches);
 const plane = $('.cipher-plane');
 const trigger = $('#open-contact');
 const dialog = $('#contact-dialog');
@@ -35,17 +38,28 @@ const ease = [0.22, 1, 0.36, 1];
 
 const tiltX = springValue(0, { stiffness: 85, damping: 22 });
 const tiltY = springValue(0, { stiffness: 85, damping: 22 });
-const layerX = springValue(0, { stiffness: 70, damping: 20 });
-const layerY = springValue(0, { stiffness: 70, damping: 20 });
 styleEffect(plane, { rotateX: tiltX, rotateY: tiltY });
-styleEffect($('.cipher-core'), { x: layerX, y: layerY });
+// The rune stays mechanically centered; depth belongs to the whole instrument.
+function updateWorldPointer() { background.setPointer(tiltY.get() / 4, -tiltX.get() / 4); }
+tiltX.on('change', updateWorldPointer);
+tiltY.on('change', updateWorldPointer);
+function updateWorldOrigin() {
+  const rect = $('.cipher-object').getBoundingClientRect();
+  background.setOrigin((rect.left + rect.width / 2) / innerWidth, (rect.top + rect.height / 2) / innerHeight);
+}
+window.addEventListener('resize', updateWorldOrigin, { passive: true });
+window.addEventListener('scroll', updateWorldOrigin, { passive: true });
+new ResizeObserver(updateWorldOrigin).observe($('.stage'));
+document.fonts.ready.then(updateWorldOrigin);
+updateWorldOrigin();
 function settlePointer(immediate = false) {
-  for (const value of [tiltX, tiltY, layerX, layerY]) immediate ? value.jump(0) : value.set(0);
+  for (const value of [tiltX, tiltY]) immediate ? value.jump(0) : value.set(0);
 }
 
 function updateAmbient() {
   const active = entered && !paused && !reducedMotion.matches && !document.hidden && modalState === 'closed';
   ambient.forEach(control => active ? control.play() : control.pause());
+  background.setActive(active);
   motionToggle.hidden = reducedMotion.matches;
   motionToggle.setAttribute('aria-pressed', String(paused));
   motionToggle.setAttribute('aria-label', paused ? 'Resume animation' : 'Pause animation');
@@ -63,8 +77,9 @@ function startAmbient() {
   updateAmbient();
 }
 if (!reducedMotion.matches) {
-  const draw = animate($('.cipher-traces').querySelectorAll('.cipher-trace'), { pathLength: [0, 1] }, { duration: 1.1, ease, delay: stagger(.035) });
+  const draw = animate($('.cipher-traces').querySelectorAll(':scope > g'), { opacity: [0, 1] }, { duration: 1, ease, delay: stagger(.035) });
   entrance.push(draw,
+    animate($('#world'), { opacity: [0, 1] }, { duration: 1.4, ease }),
     animate($('.cipher-orbits'), { opacity: [0, 1] }, { duration: 1.2, ease }),
     animate($('.cipher-core'), { opacity: [0, 1] }, { duration: .9, delay: .25, ease }),
     animate(document.querySelectorAll('.name-line'), { y: ['110%', '0%'], opacity: [0, 1] }, { duration: .95, ease, delay: stagger(.09, { startDelay: .24 }) }),
@@ -78,7 +93,7 @@ scene.addEventListener('pointermove', event => {
   if (!finePointer.matches || reducedMotion.matches || paused || modalState !== 'closed') return;
   const x = Math.max(-1, Math.min(1, (event.clientX - innerWidth / 2) / (innerWidth / 2)));
   const y = Math.max(-1, Math.min(1, (event.clientY - innerHeight / 2) / (innerHeight / 2)));
-  tiltX.set(-y * 4); tiltY.set(x * 4); layerX.set(x * 6); layerY.set(y * 6);
+  tiltX.set(-y * 4); tiltY.set(x * 4);
 }, { passive: true });
 scene.addEventListener('pointerleave', () => settlePointer());
 motionToggle.addEventListener('click', () => { paused = !paused; settlePointer(); updateAmbient(); });
@@ -167,6 +182,7 @@ dialog.addEventListener('pointerdown', event => { backdropDown = event.target ==
 dialog.addEventListener('pointerup', event => { if (backdropDown && event.target === dialog && outsidePanel(event)) closeContact(); backdropDown = false; });
 
 reducedMotion.addEventListener('change', () => {
+  background.setReducedMotion(reducedMotion.matches);
   if (reducedMotion.matches) {
     entrance.forEach(control => control.complete()); successAnimations.forEach(control => control.complete()); contactHover.forEach(control => control.stop()); settlePointer(true);
     ambient.splice(0).forEach(control => control.stop()); $('.cipher-scan').style.opacity = '.25';

@@ -1,6 +1,6 @@
 # twenty nine eleven
 
-A centered single page for security and bespoke technology. Obsidian, silver and phosphor green; an original eleven-fold cipher; self-hosted typography; continuous [Motion](https://motion.dev/) animation. One services line and a contact modal. No header or footer.
+A centered single page for security and bespoke technology. A full viewport of moving mineral surfaces, a balanced eleven-sector metal cipher, self-hosted typography and [Motion](https://motion.dev/) spring interactions. Two capability rows and a contact modal. No header or footer.
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
@@ -44,9 +44,12 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 - `src/style.css`: composition, type and color.
 - `src/main.js`: continuous Motion, dialog transitions, validation and submission states.
 - `src/cipher.js`: original SVG cipher geometry and favicon.
+- `src/background.js`: viewport surface field, WebGL/Canvas rendering and activity controls.
 - `wrangler.jsonc`: email destination restrictions, endpoint and allowed origins.
 - [worker/README.md](worker/README.md): backend details, prerequisites and limitations.
 
-Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. The cipher has independent rotating arcs, a travelling illuminated segment, spring pointer response and a motion-pause control. Ambient motion pauses while contact is open or the tab is hidden. Reduced motion renders the finished composition immediately. Compact service labels keep the mobile list on one line.
+Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. The cipher has balanced metallic facets, independent rotating arcs, a travelling illuminated segment and spring pointer response. Every rotating SVG layer uses the same viewBox center; the rune stays fixed at the center of the instrument.
+
+The whole viewport renders a continuous folded surface field, using WebGL2 when available and shaded Canvas2D ribbons otherwise. The field follows the cipher's viewport position and the Motion-smoothed pointer. Backing resolution is capped at 2.8 million pixels. A centered pause control stops the field and glyph loops together. Ambient motion also pauses while contact is open or the tab is hidden; reduced motion renders a still composition. Compact labels keep each capability row on one line on mobile.
 
 The native dialog expands from the contact control, traps keyboard focus and restores focus on dismissal. Drafts and pending requests survive closing/reopening. Browser checks use a local email fixture; the real backend activation remains separate.
