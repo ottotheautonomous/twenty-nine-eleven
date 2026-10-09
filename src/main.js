@@ -1,16 +1,21 @@
 import './style.css';
-import { animate, stagger, hover, springValue, styleEffect } from 'motion';
-import { cipherMarkup } from './cipher.js';
-import { createBackground } from './background.js';
+import { animate, stagger, hover, press, springValue, styleEffect } from 'motion';
+import { createThreshold } from './threshold.js';
 import { createTextMotion } from './text-motion.js';
+import { uniforms, yaw, pitch, lightX, lightY, engage, idle, heavy, settled } from './scene-state.js';
 
 const $ = selector => document.querySelector(selector);
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const root = document.documentElement;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const params = new URLSearchParams(location.search);
+const debug = params.has('debug') ? Number(params.get('debug')) || 0 : -1;
 const scene = $('.scene');
-$('#cipher').innerHTML = cipherMarkup;
-const background = createBackground($('#world'));
-const plane = $('.cipher-plane');
+const stage = $('.stage');
+const anchor = $('.mark-anchor');
+const wordmark = $('#company-name');
+const words = [...document.querySelectorAll('.name-word')];
+const canvas = $('#world');
 const trigger = $('#open-contact');
 const dialog = $('#contact-dialog');
 const surface = $('.dialog-surface');
@@ -23,7 +28,7 @@ const status = $('#form-status');
 const success = $('#success');
 const buttonLabel = $('.button-label');
 const endpoint = import.meta.env.VITE_CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact';
-const ambient = [];
+const ease = [0.22, 1, 0.36, 1];
 const entrance = [];
 let successAnimations = [];
 let modalAnimations = [];
@@ -37,92 +42,111 @@ let returnFocus = trigger;
 let pointerIntent = 0;
 let focusIntent = 0;
 let pointerElement = null;
-const ease = [0.22, 1, 0.36, 1];
-const textFeedback = createTextMotion(document.querySelectorAll('.service-control, .purpose, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
-  canAnimate: () => !reducedMotion.matches && !paused,
-});
-const spring = { stiffness: 95, damping: 23 };
-const pointerX = springValue(0, spring);
-const pointerY = springValue(0, spring);
-const tiltX = springValue(0, spring);
-const tiltY = springValue(0, spring);
-const nameX = springValue(0, spring);
-const nameY = springValue(0, spring);
-const focusX = springValue(.5, spring);
-const focusY = springValue(.4, spring);
-const lightX = springValue('50%', spring);
-const lightY = springValue('45%', spring);
-const engagement = springValue(0, { stiffness: 75, damping: 21 });
-styleEffect(plane, { rotateX: tiltX, rotateY: tiltY });
-styleEffect($('#company-name'), { x: nameX, y: nameY });
-styleEffect(document.documentElement, { '--visitor-x': lightX, '--visitor-y': lightY });
+let looping = false;
+let idleArmed = false;
+let idleTimer = 0;
+let pulse = null;
+const still = () => reducedMotion.matches || paused;
 
-function updateWorldPointer() { background.setPointer(pointerX.get(), pointerY.get()); }
-function updateWorldFocus() { background.setFocus(focusX.get(), focusY.get()); }
-pointerX.on('change', updateWorldPointer); pointerY.on('change', updateWorldPointer);
-focusX.on('change', updateWorldFocus); focusY.on('change', updateWorldFocus);
-function updateIntent(value) {
-  const spatial = !reducedMotion.matches && !paused;
-  $('.shelter-left').style.transform = spatial ? `translateX(${-value * 3}px)` : 'none';
-  $('.shelter-right').style.transform = spatial ? `translateX(${value * 3}px)` : 'none';
-  $('.way-sun').style.transform = spatial ? `translateY(${-value * 2}px)` : 'none';
-  $('.way-path').style.opacity = String(.65 + value * .35);
-  $('.way-horizon').style.opacity = String(.7 + value * .3);
-  $('.way-atmosphere').style.opacity = String(.55 + value * .45);
-  $('.way-guidance').style.opacity = String(.4 + value * .6);
-  background.setEngagement(value);
-  scene.dataset.engagement = value.toFixed(3);
+// Lift the CSS entrance gate without a flash: targets start transparent inline.
+const entering = [canvas, ...words, ...document.querySelectorAll('[data-enter], .services li'), motionToggle];
+if (!reducedMotion.matches) entering.forEach(element => { element.style.opacity = '0'; });
+root.classList.add('entered');
+
+const threshold = createThreshold(canvas, anchor, uniforms, { debug: Math.max(0, debug), readout: debug >= 0 });
+root.dataset.renderer = threshold.type;
+if (debug >= 0) window.__tne = { uniforms, threshold };
+
+const textFeedback = createTextMotion(document.querySelectorAll('.service-control, .verse, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
+  canAnimate: () => !still(),
+});
+// The wordmark sits on the floor, farther than the door: it parallaxes opposite
+// the pointer on the camera's spring, so the two layers move as one rig.
+const nameX = springValue(0, heavy);
+const nameY = springValue(0, heavy);
+styleEffect(wordmark, { x: nameX, y: nameY });
+const soft = { stiffness: 95, damping: 23 };
+const textLightX = springValue('50%', soft);
+const textLightY = springValue('45%', soft);
+styleEffect(root, { '--visitor-x': textLightX, '--visitor-y': textLightY });
+// When the loop is idle (paused, reduced motion, modal open) engagement still
+// redraws the composed frame, so the door answers without moving.
+engage.on('change', () => { if (!looping) threshold.drawOnce(); });
+
+// One continuous light across the words: each word's background is the h1 box.
+function measureName() {
+  wordmark.style.setProperty('--name-w', `${wordmark.offsetWidth}px`);
+  wordmark.style.setProperty('--name-h', `${wordmark.offsetHeight}px`);
+  for (const word of words) {
+    word.style.setProperty('--word-x', word.offsetLeft - wordmark.offsetLeft);
+    word.style.setProperty('--word-y', word.offsetTop - wordmark.offsetTop);
+  }
 }
-engagement.on('change', updateIntent);
-function refreshIntent() {
-  const value = clamp(Math.max(pointerIntent, focusIntent));
-  if (reducedMotion.matches || paused) engagement.jump(value); else engagement.set(value);
-}
-function updateWorldOrigin() {
-  const rect = $('.cipher-object').getBoundingClientRect();
-  background.setOrigin((rect.left + rect.width / 2) / innerWidth, (rect.top + rect.height / 2) / innerHeight);
-}
-window.addEventListener('resize', updateWorldOrigin, { passive: true });
-window.addEventListener('scroll', updateWorldOrigin, { passive: true });
-new ResizeObserver(updateWorldOrigin).observe($('.stage'));
-document.fonts.ready.then(updateWorldOrigin);
-updateWorldOrigin();
-updateIntent(0);
+function measure() { threshold.measure(); measureName(); }
+window.addEventListener('resize', () => { threshold.resize(); measureName(); textFeedback.refresh(); }, { passive: true });
+window.addEventListener('scroll', () => threshold.measure(), { passive: true });
+new ResizeObserver(measure).observe(stage);
+document.fonts.ready.then(measure);
+measureName();
 
 function settlePointer(immediate = false) {
-  for (const value of [pointerX, pointerY, tiltX, tiltY, nameX, nameY]) immediate ? value.jump(0) : value.set(0);
+  const home = [[yaw, 0], [pitch, 0], [lightX, 0], [lightY, 0.2], [nameX, 0], [nameY, 0]];
+  for (const [value, target] of home) immediate ? value.jump(target) : value.set(target);
+}
+function refreshIntent() {
+  const value = clamp(Math.max(pointerIntent, focusIntent));
+  if (still()) engage.jump(value); else engage.set(value);
 }
 function updateAmbient() {
-  const active = entered && !paused && !reducedMotion.matches && !document.hidden && modalState === 'closed';
-  ambient.forEach(control => active ? control.play() : control.pause());
-  background.setReducedMotion(reducedMotion.matches || paused);
-  background.setActive(active);
-  motionToggle.hidden = reducedMotion.matches;
+  looping = !still() && !document.hidden && modalState !== 'open';
+  threshold.setActive(looping);
+  motionToggle.hidden = reducedMotion.matches || threshold.type === 'static';
   motionToggle.setAttribute('aria-pressed', String(paused));
-  motionToggle.setAttribute('aria-label', paused ? 'Resume animation' : 'Pause animation');
-  motionToggle.title = paused ? 'Resume animation' : 'Pause animation';
+  motionToggle.setAttribute('aria-label', paused ? 'Resume motion' : 'Pause motion');
+  motionToggle.title = paused ? 'Resume motion' : 'Pause motion';
   $('#motion-icon').setAttribute('d', paused ? 'm7 5 7 5-7 5Z' : 'M7 5v10M13 5v10');
 }
-function startAmbient() {
-  if (ambient.length || reducedMotion.matches) return;
-  // A grounded, open shelter: light breathes, architecture does not spin.
-  ambient.push(animate($('.cipher-light'), { opacity: [.55, .85, .55] }, { duration: 9, ease: 'easeInOut', repeat: Infinity }));
-  updateAmbient();
+function applyMotionPolicy() {
+  uniforms.u_motion.value = still() ? 0 : 1;
+  updateAmbient(); refreshIntent(); resetServiceMotion(); threshold.drawOnce();
 }
-if (!reducedMotion.matches) {
-  const reveal = animate($('.cipher-traces').querySelectorAll(':scope > g'), { opacity: [0, 1] }, { duration: 1, ease, delay: stagger(.09) });
-  entrance.push(reveal,
-    animate($('#world'), { opacity: [0, 1] }, { duration: 1.4, ease }),
-    animate($('.cipher-orbits'), { opacity: [0, 1] }, { duration: 1.2, ease }),
-    animate($('.cipher-core'), { opacity: [0, 1] }, { duration: .9, delay: .25, ease }),
-    animate(document.querySelectorAll('.name-line'), { y: ['110%', '0%'], opacity: [0, 1] }, { duration: .95, ease, delay: stagger(.09, { startDelay: .24 }) }),
-    animate(document.querySelectorAll('[data-enter]'), { opacity: [0, 1], y: [10, 0] }, { duration: .75, ease, delay: stagger(.06, { startDelay: .5 }) }),
+
+// Idle: after four quiet seconds the camera drifts on a slow Lissajous and the
+// dawn breathes. Any input hands control back to the springs.
+function noteActivity() {
+  if (!idleArmed) return;
+  if (idle.get() !== 0) idle.set(0);
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (!still() && modalState === 'closed') idle.set(1); }, 4000);
+}
+function armIdle() { idleArmed = true; noteActivity(); }
+document.addEventListener('keydown', noteActivity);
+
+// Entrance: the plan sweeps out, the door rises and materialises, the dawn
+// ignites behind it, then the name opens from the centre like a door.
+if (reducedMotion.matches) {
+  for (const [key, value] of Object.entries(settled)) uniforms[key].value = value;
+} else {
+  entrance.push(
+    animate(canvas, { opacity: [0, 1] }, { duration: .6 }),
+    animate(uniforms, { u_plan: [0, 1] }, { duration: 1.4, ease, delay: .1 }),
+    animate(uniforms, { u_rise: [0, 1] }, { type: 'spring', visualDuration: 1.1, bounce: .12, delay: .35 }),
+    animate(uniforms, { u_reveal: [0, 1] }, { duration: 1.3, ease, delay: .35 }),
+    animate(uniforms, { u_dawn: [0, 1] }, { duration: 1.5, ease: [0.2, 0.8, 0.2, 1], delay: 1.05 }),
+    animate(words, { y: ['105%', '0%'], opacity: [0, 1] }, { duration: .9, ease, delay: stagger(.09, { from: 'center', startDelay: 1.25 }) }),
+    animate('.work-type', { opacity: [0, 1], y: [8, 0] }, { duration: .7, ease, delay: 1.55 }),
+    animate('.services-primary li', { opacity: [0, 1], y: [6, 0] }, { duration: .6, ease, delay: stagger(.04, { from: 'center', startDelay: 1.7 }) }),
+    animate('.services-secondary li', { opacity: [0, 1], y: [6, 0] }, { duration: .6, ease, delay: stagger(.035, { from: 'center', startDelay: 1.82 }) }),
+    animate('.contact-trigger-shell', { opacity: [0, 1], y: [6, 0] }, { duration: .6, ease, delay: 1.95 }),
+    animate('.verse', { opacity: [0, 1] }, { duration: .8, delay: 2.1 }),
+    animate(motionToggle, { opacity: [0, .6] }, { duration: .6, delay: 2.3 }),
   );
-  reveal.finished.then(() => { entered = true; startAmbient(); updateAmbient(); });
+  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; armIdle(); });
 }
+uniforms.u_motion.value = still() ? 0 : 1;
 updateAmbient();
 
-const intentLevels = { shelter: .7, identity: .45, purpose: .65, work: .45, service: .85, contact: 1 };
+const intentLevels = { purpose: .65, work: .45, service: .85, contact: 1 };
 function targetIntent(element) { return intentLevels[element?.dataset.react] || .25; }
 function setPointerElement(element) {
   if (element === pointerElement) return;
@@ -134,24 +158,23 @@ function visitPoint(clientX, clientY, input = 'mouse', target = null) {
   const fx = clamp(clientX / Math.max(1, innerWidth));
   const fy = clamp(clientY / Math.max(1, innerHeight));
   const x = fx * 2 - 1; const y = fy * 2 - 1;
-  const instant = reducedMotion.matches || paused;
+  const instant = still();
   const set = (value, next) => instant ? value.jump(next) : value.set(next);
-  set(focusX, fx); set(focusY, fy);
-  const lightingRect = (modalState === 'closed' ? $('#company-name') : dialog).getBoundingClientRect();
-  set(lightX, `${clamp((clientX - lightingRect.left) / Math.max(1, lightingRect.width)) * 100}%`);
-  set(lightY, `${clamp((clientY - lightingRect.top) / Math.max(1, lightingRect.height)) * 100}%`);
+  const lighting = (modalState === 'closed' ? wordmark : dialog).getBoundingClientRect();
+  set(textLightX, `${clamp((clientX - lighting.left) / Math.max(1, lighting.width)) * 100}%`);
+  set(textLightY, `${clamp((clientY - lighting.top) / Math.max(1, lighting.height)) * 100}%`);
   if (!instant && modalState === 'closed') {
-    pointerX.set(x); pointerY.set(y);
-    tiltX.set(-y * 5); tiltY.set(x * 6);
-    nameX.set(x * 4); nameY.set(y * 2.5);
+    yaw.set(x * 0.12); pitch.set(-y * 0.06);
+    lightX.set(x * 1.25); lightY.set(0.25 - y * 0.85);
+    nameX.set(-x * 6); nameY.set(-y * 3);
   }
-  const art = $('.cipher-object').getBoundingClientRect();
-  const distance = Math.hypot(clientX - art.left - art.width / 2, clientY - art.top - art.height / 2);
-  const proximity = clamp(1 - distance / (art.width * .95)) * .8;
-  if (input !== 'keyboard') pointerIntent = Math.max(proximity, target ? targetIntent(target) : .1);
+  const door = anchor.getBoundingClientRect();
+  const distance = Math.hypot(clientX - door.left - door.width / 2, clientY - door.top - door.height / 2);
+  const proximity = clamp(1 - distance / (door.height * 1.1)) * .6;
+  if (input !== 'keyboard') pointerIntent = Math.max(proximity, target ? targetIntent(target) : 0);
   refreshIntent();
+  noteActivity();
   scene.dataset.input = input;
-  scene.dataset.focus = `${fx.toFixed(3)},${fy.toFixed(3)}`;
 }
 
 scene.addEventListener('pointermove', event => {
@@ -165,10 +188,11 @@ scene.addEventListener('pointerdown', event => {
   const target = event.target.closest('[data-react]');
   setPointerElement(target);
   visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse', target);
-  // An impulse starts at the real press, rather than the lagging spring focus.
-  focusX.jump(clamp(event.clientX / Math.max(1, innerWidth)));
-  focusY.jump(clamp(event.clientY / Math.max(1, innerHeight)));
-  if (!reducedMotion.matches && !paused) background.setImpulse(event.pointerType === 'touch' ? .75 : .45);
+  // A press sends a pulse of light through the door and across the floor.
+  if (!still() && entered) {
+    pulse?.stop();
+    pulse = animate(uniforms, { u_pulse: [0, 1] }, { duration: 1.6, ease: [0.16, 1, 0.3, 1] });
+  }
 }, { passive: true });
 function leaveScene() { pointerIntent = 0; setPointerElement(null); settlePointer(); refreshIntent(); }
 scene.addEventListener('pointerleave', leaveScene);
@@ -195,9 +219,13 @@ form.addEventListener('input', () => {
   refreshIntent();
 });
 motionToggle.addEventListener('click', () => {
-  paused = !paused; settlePointer(true); background.setImpulse(0);
-  resetServiceMotion(); resetContactFeedback();
-  updateAmbient(); refreshIntent(); updateIntent(engagement.get());
+  paused = !paused;
+  if (paused) {
+    entrance.forEach(control => control.complete()); pulse?.complete();
+    settlePointer(true); idle.jump(0); clearTimeout(idleTimer);
+  } else noteActivity();
+  resetContactFeedback();
+  applyMotionPolicy();
 });
 document.addEventListener('visibilitychange', updateAmbient);
 
@@ -211,26 +239,33 @@ function resetContactFeedback() {
   contactHover.forEach(control => control.stop());
   contactHover = [
     setImmediateMotion($('.contact-arrow'), { x: 0 }),
-    setImmediateMotion($('.contact-rule'), { scaleX: document.activeElement === trigger ? 1 : .26 }),
+    setImmediateMotion($('.contact-rule'), { scaleX: document.activeElement === trigger ? 1 : .3 }),
   ];
 }
 function highlightContact(active) {
   contactHover.forEach(control => control.stop()); contactHover = [];
-  if (reducedMotion.matches || paused) {
-    contactHover.push(setImmediateMotion($('.contact-rule'), { scaleX: active ? 1 : .26 }));
+  if (still()) {
+    contactHover.push(setImmediateMotion($('.contact-rule'), { scaleX: active ? 1 : .3 }));
     return;
   }
   contactHover.push(
-    animate($('.contact-rule'), { scaleX: active ? 1 : .26 }, { type: 'spring', stiffness: 220, damping: 27 }),
+    animate($('.contact-rule'), { scaleX: active ? 1 : .3 }, { type: 'spring', stiffness: 220, damping: 27 }),
     animate($('.contact-arrow'), { x: active ? 4 : 0 }, { type: 'spring', stiffness: 220, damping: 27 }),
   );
 }
 hover(trigger, () => { highlightContact(true); return () => highlightContact(false); });
 trigger.addEventListener('focus', () => highlightContact(true));
 trigger.addEventListener('blur', () => highlightContact(false));
+// Tactile press on every control.
+const pressSpring = { type: 'spring', stiffness: 400, damping: 30 };
+press('.service-control, #open-contact, .send-button', element => {
+  if (still()) return;
+  animate(element, { scale: .97 }, pressSpring);
+  return () => animate(element, { scale: 1 }, pressSpring);
+});
 
 function resetServiceMotion() {
-  if (paused || reducedMotion.matches) textFeedback.reset(); else textFeedback.refresh();
+  if (still()) textFeedback.reset(); else textFeedback.refresh();
 }
 for (const button of document.querySelectorAll('.service-control')) {
   button.addEventListener('click', () => {
@@ -240,12 +275,16 @@ for (const button of document.querySelectorAll('.service-control')) {
     openContact(button);
   });
 }
-window.addEventListener('resize', () => textFeedback.refresh(), { passive: true });
 
+// The contact panel comes through the door: it grows from the door's screen
+// position while the camera dollies back and the dawn dims behind it.
 function stopModalAnimations() { modalAnimations.forEach(control => control.stop()); modalAnimations = []; }
-function collapsedTransform() {
-  const from = (returnFocus?.isConnected ? returnFocus : trigger).getBoundingClientRect(); const to = dialog.getBoundingClientRect();
-  return `translate(${from.x + from.width / 2 - to.x - to.width / 2}px, ${from.y + from.height / 2 - to.y - to.height / 2}px) scale(${from.width / to.width}, ${from.height / to.height})`;
+function doorTransform() {
+  const from = anchor.getBoundingClientRect(); const to = dialog.getBoundingClientRect();
+  return `translate(${from.x + from.width / 2 - to.x - to.width / 2}px, ${from.y + from.height / 2 - to.y - to.height / 2}px) scale(.5)`;
+}
+function setScenery(value) {
+  uniforms.u_dolly.value = value; uniforms.u_dim.value = value; threshold.drawOnce();
 }
 function focusContact() {
   if (!success.hidden) success.focus({ preventScroll: true });
@@ -257,38 +296,49 @@ function openContact(origin = trigger) {
   const wasClosed = !dialog.open; const serial = ++modalSerial;
   stopModalAnimations();
   if (wasClosed) { returnFocus = origin; dialog.showModal(); }
-  modalState = 'opening'; settlePointer(); updateAmbient(); surface.scrollTop = 0; focusContact();
+  modalState = 'opening'; settlePointer(still()); idle.jump(0); clearTimeout(idleTimer);
+  surface.scrollTop = 0; focusContact(); updateAmbient();
   if (reducedMotion.matches) {
     surface.style.transform = 'none'; surface.style.opacity = '1';
     document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
-    scene.style.opacity = '.3'; veil.style.opacity = '1'; modalState = 'open'; return;
+    scene.style.opacity = '.22'; veil.style.opacity = '.6'; setScenery(1);
+    modalState = 'open'; updateAmbient(); return;
   }
-  const transform = wasClosed ? [collapsedTransform(), 'translate(0px, 0px) scale(1, 1)'] : 'translate(0px, 0px) scale(1, 1)';
-  const frame = animate(surface, { transform, opacity: 1 }, { duration: .55, ease });
-  modalAnimations.push(frame,
-    animate(scene, { scale: .985, opacity: .3 }, { duration: .35, ease }),
-    animate(veil, { opacity: 1 }, { duration: .35 }),
-    animate(document.querySelectorAll('.dialog-item'), { opacity: [0, 1], y: [9, 0] }, { duration: .36, ease, delay: stagger(.035, { startDelay: .19 }) }),
+  const scenery = paused ? (setScenery(1), []) : [
+    animate(uniforms, { u_dolly: 1 }, { duration: .7, ease }),
+    animate(uniforms, { u_dim: 1 }, { duration: .5, ease }),
+  ];
+  const panel = animate(surface, { transform: wasClosed ? [doorTransform(), 'translate(0px, 0px) scale(1)'] : 'translate(0px, 0px) scale(1)' }, { type: 'spring', visualDuration: .6, bounce: .05 });
+  modalAnimations.push(panel, ...scenery,
+    animate(surface, { opacity: wasClosed ? [0, 1] : 1 }, { duration: .3, ease }),
+    animate(veil, { opacity: .6 }, { duration: .35 }),
+    animate(scene, { opacity: .22 }, { duration: .35, ease }),
+    animate(document.querySelectorAll('.dialog-item'), { opacity: [0, 1], y: [9, 0] }, { duration: .36, ease, delay: stagger(.035, { startDelay: .18 }) }),
   );
-  frame.finished.then(() => { if (serial === modalSerial) modalState = 'open'; });
+  Promise.all([panel, ...scenery].map(control => control.finished)).then(() => {
+    if (serial !== modalSerial) return;
+    modalState = 'open'; updateAmbient();
+  });
 }
 function finishClose(serial) {
   if (serial !== modalSerial) return;
   dialog.close(); modalState = 'closed';
-  scene.style.transform = 'none'; scene.style.opacity = '1'; veil.style.opacity = '0';
-  updateAmbient(); (returnFocus?.isConnected ? returnFocus : trigger).focus({ preventScroll: true });
+  scene.style.opacity = '1'; veil.style.opacity = '0';
+  if (still()) setScenery(0);
+  updateAmbient(); noteActivity(); (returnFocus?.isConnected ? returnFocus : trigger).focus({ preventScroll: true });
 }
 function closeContact() {
   if (!dialog.open || modalState === 'closing') return;
-  const serial = ++modalSerial; stopModalAnimations(); modalState = 'closing';
+  const serial = ++modalSerial; stopModalAnimations(); modalState = 'closing'; updateAmbient();
   if (reducedMotion.matches) { finishClose(serial); return; }
-  const frame = animate(surface, { transform: collapsedTransform(), opacity: 0 }, { duration: .27, ease: [0.4, 0, 0.2, 1] });
-  modalAnimations.push(frame,
+  const panel = animate(surface, { transform: doorTransform(), opacity: 0 }, { duration: .28, ease: [0.4, 0, 0.2, 1] });
+  modalAnimations.push(panel,
     animate(document.querySelectorAll('.dialog-item'), { opacity: 0 }, { duration: .12 }),
-    animate(scene, { scale: 1, opacity: 1 }, { duration: .27, ease }),
-    animate(veil, { opacity: 0 }, { duration: .27 }),
+    animate(veil, { opacity: 0 }, { duration: .28 }),
+    animate(scene, { opacity: 1 }, { duration: .28, ease }),
   );
-  frame.finished.then(() => finishClose(serial));
+  if (!paused) modalAnimations.push(animate(uniforms, { u_dolly: 0, u_dim: 0 }, { duration: .6, ease }));
+  panel.finished.then(() => finishClose(serial));
 }
 trigger.addEventListener('click', () => openContact(trigger));
 $('#close-contact').addEventListener('click', closeContact);
@@ -311,21 +361,20 @@ dialog.addEventListener('pointerdown', event => { backdropDown = event.target ==
 dialog.addEventListener('pointerup', event => { if (backdropDown && event.target === dialog && outsidePanel(event)) closeContact(); backdropDown = false; });
 
 reducedMotion.addEventListener('change', () => {
-  background.setReducedMotion(reducedMotion.matches || paused);
   if (reducedMotion.matches) {
-    entrance.forEach(control => control.complete()); successAnimations.forEach(control => control.complete()); contactHover.forEach(control => control.stop()); resetServiceMotion(); settlePointer(true);
-    ambient.splice(0).forEach(control => control.stop());
-    resetContactFeedback(); $('.cipher-traces').style.transform = 'none';
+    entrance.forEach(control => control.complete()); successAnimations.forEach(control => control.complete()); pulse?.complete();
+    contactHover.forEach(control => control.stop()); settlePointer(true); idle.jump(0); clearTimeout(idleTimer);
+    resetContactFeedback();
     const state = modalState; const serial = ++modalSerial; stopModalAnimations();
     if (state === 'closing') finishClose(serial);
     else if (dialog.open) {
       surface.style.transform = 'none'; surface.style.opacity = '1';
       document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
-      scene.style.transform = 'none'; scene.style.opacity = '.3'; veil.style.opacity = '1'; modalState = 'open';
+      scene.style.opacity = '.22'; veil.style.opacity = '.6'; setScenery(1); modalState = 'open';
     }
     entered = true;
-  } else { startAmbient(); }
-  updateAmbient(); refreshIntent(); updateIntent(engagement.get()); resetServiceMotion();
+  } else noteActivity();
+  applyMotionPolicy();
 });
 
 const fields = ['name', 'email', 'message'].map(name => form.elements.namedItem(name));

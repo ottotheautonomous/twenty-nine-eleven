@@ -49,7 +49,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     active ? state.owners.add(owner) : state.owners.delete(owner);
     state.controls.forEach(control => control.stop());
     const lit = state.owners.size > 0;
-    const values = { scale: canAnimate() ? (lit ? 1.35 : 1) : 1, color: lit ? '#fff0c8' : state.color, opacity: lit ? 1 : .65 };
+    const values = { scale: canAnimate() ? (lit ? 1.35 : 1) : 1, color: lit ? '#ffe3b0' : state.color, opacity: lit ? 1 : .65 };
     state.controls = [immediateOnly || !canAnimate() ? immediate(separator, values) : animate(separator, values, { duration: .2, ease: 'easeOut' })];
   }
   function visibleLabels(record) { return record.labels.filter(label => label.getClientRects().length); }
@@ -61,7 +61,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     const labels = visibleLabels(record);
     const chars = labels.flatMap(label => [...label.querySelectorAll('.motion-char')]);
     const scale = active && spatial ? (compact() ? 1.025 : 1.04) : 1;
-    const lift = active && spatial ? (compact() ? -2.2 : -3.6) : 0;
+    const lift = active && spatial ? (compact() ? -1.8 : -2.6) : 0;
     const labelValues = { scale };
     if (spatial) {
       for (const hidden of record.labels.filter(label => !labels.includes(label))) {
@@ -71,7 +71,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
       record.controls.push(animate(labels, labelValues, spring));
       for (const label of labels) {
         const letters = [...label.querySelectorAll('.motion-char')];
-        record.controls.push(animate(letters, { y: lift, color: active ? '#fff1cb' : record.colors.get(label) }, {
+        record.controls.push(animate(letters, { y: lift, color: active ? '#ffe9c4' : record.colors.get(label) }, {
           ...spring,
           delay: active ? stagger(Math.min(.012, .1 / Math.max(1, chars.length - 1))) : 0,
           color: { duration: active ? .24 : .2, ease: 'easeOut' },
@@ -80,7 +80,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     } else {
       // Reset hidden responsive variants as well, so switching widths is clean.
       record.labels.forEach(label => record.controls.push(immediate(label, { scale: 1 })));
-      for (const label of record.labels) label.querySelectorAll('.motion-char').forEach(char => record.controls.push(immediate(char, { y: 0, color: active ? '#fff1cb' : record.colors.get(label) })));
+      for (const label of record.labels) label.querySelectorAll('.motion-char').forEach(char => record.controls.push(immediate(char, { y: 0, color: active ? '#ffe9c4' : record.colors.get(label) })));
     }
     if (record.line) {
       record.line.style.transformOrigin = record.origin;

@@ -3,38 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#080c0b" />
+  <meta name="theme-color" content="#060b0d" />
   <meta name="description" content="Twenty Nine Eleven. Security, networks, access control and cameras. CNC, fabrication, applied AI, computer vision, software, creative production and design." />
   <meta property="og:title" content="Twenty Nine Eleven — Security & bespoke technology" />
   <meta property="og:description" content="Security and bespoke technology. CNC, fabrication, AI, software, creative production and design. Start a conversation." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="/mark.svg" />
   <title>Twenty Nine Eleven — Security & bespoke technology</title>
+  <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
   <canvas id="world" class="world" aria-hidden="true"></canvas>
   <main class="scene" aria-labelledby="company-name">
     <div class="stage">
-      <div class="cipher-object" data-react="shelter">
-        <div class="cipher-light" aria-hidden="true"></div>
-        <div class="cipher-plane" aria-hidden="true"><svg id="cipher" viewBox="0 0 320 320" fill="none"></svg></div>
-        <button class="motion-toggle" type="button" aria-label="Pause animation" aria-pressed="false" title="Pause animation" hidden>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path id="motion-icon" d="M7 5v10M13 5v10" /></svg>
-        </button>
+      <div class="mark-anchor" aria-hidden="true">
+        <svg class="mark-still" viewBox="26 30 148 200" fill="none" focusable="false">
+          <defs>
+            <radialGradient id="mark-dawn" cx="100" cy="150" r="78" gradientUnits="userSpaceOnUse"><stop stop-color="#ffd9a3" stop-opacity=".6"/><stop offset=".55" stop-color="#ffb866" stop-opacity=".12"/><stop offset="1" stop-color="#ffb866" stop-opacity="0"/></radialGradient>
+            <linearGradient id="mark-shaft" x1="0" y1="230" x2="0" y2="290" gradientUnits="userSpaceOnUse"><stop stop-color="#ffd9a3" stop-opacity=".2"/><stop offset="1" stop-color="#ffd9a3" stop-opacity="0"/></linearGradient>
+            <linearGradient id="mark-face" x1="0" y1="30" x2="0" y2="230" gradientUnits="userSpaceOnUse"><stop stop-color="#1e3034"/><stop offset=".6" stop-color="#111c1f"/><stop offset="1" stop-color="#0c1417"/></linearGradient>
+            <clipPath id="mark-open"><path d="M43 230V104A57 57 0 0 1 157 104V230Z"/></clipPath>
+          </defs>
+          <rect x="26" y="30" width="148" height="200" fill="url(#mark-dawn)" clip-path="url(#mark-open)"/>
+          <path d="M43 230L-10 290H210L157 230Z" fill="url(#mark-shaft)"/>
+          <path fill-rule="evenodd" fill="url(#mark-face)" stroke="#cfe0db" stroke-opacity=".8" stroke-width="1.2" d="M26 30H174V230H26Z M43 230V104A57 57 0 0 1 157 104V230Z"/>
+          <path d="M43 230V104A57 57 0 0 1 157 104V230" fill="none" stroke="#ffd9a3" stroke-opacity=".55" stroke-width="1"/>
+          <path d="M-20 246H220" stroke="#7fa09b" stroke-opacity=".22"/>
+        </svg>
       </div>
-      <h1 id="company-name" aria-label="Twenty Nine Eleven" data-react="identity">
-        <span class="name-mask"><span class="name-line">TWENTY NINE</span></span>
-        <span class="name-mask"><span class="name-line name-second">ELEVEN</span></span>
+      <h1 id="company-name" aria-label="Twenty Nine Eleven">
+        <span class="name-mask" aria-hidden="true"><span class="name-word">TWENTY</span></span>
+        <span class="name-mask" aria-hidden="true"><span class="name-word">NINE</span></span>
+        <span class="name-break" aria-hidden="true"></span>
+        <span class="name-mask" aria-hidden="true"><span class="name-word">ELEVEN</span></span>
       </h1>
-      <p class="purpose" data-enter data-react="purpose"><span>Hope &amp; a future.</span><span class="verse-reference">Jeremiah 29:11</span></p>
-      <p class="work-type" data-enter data-react="work">Security <span class="work-amp">&</span> bespoke technology</p>
-      <ul class="services" aria-label="Security and infrastructure" data-enter>
+      <p class="work-type" data-enter data-react="work">Security <span class="work-amp">&amp;</span> bespoke technology</p>
+      <ul class="services services-primary" aria-label="Security and infrastructure">
         <li><button class="service-control" type="button" data-react="service" data-service="Penetration testing" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Penetration testing</span><span class="service-short">Pentesting</span></button></li>
         <li><button class="service-control" type="button" data-react="service" data-service="Networks" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>Networks</button></li>
         <li><button class="service-control" type="button" data-react="service" data-service="Access control" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Access control</span><span class="service-short">Access</span></button></li>
         <li><button class="service-control" type="button" data-react="service" data-service="Cameras" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>Cameras</button></li>
       </ul>
-      <ul class="services services-secondary" aria-label="Fabrication, intelligence and creative work" data-enter>
+      <ul class="services services-secondary" aria-label="Fabrication, intelligence and creative work">
         <li><button class="service-control" type="button" data-react="service" data-service="CNC" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>CNC</button></li>
         <li><button class="service-control" type="button" data-react="service" data-service="Fabrication" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Fabrication</span><span class="service-short">Fab</span></button></li>
         <li><button class="service-control" type="button" data-react="service" data-service="Applied AI" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Applied AI</span><span class="service-short">AI</span></button></li>
@@ -50,9 +60,13 @@
           <span class="contact-rule" aria-hidden="true"></span>
         </button>
       </div>
-      <noscript><p class="no-script">Enable JavaScript to open contact.</p></noscript>
+      <p class="verse" data-enter data-react="purpose"><span class="verse-text">Plans for hope and a future.</span> <span class="verse-reference">Jeremiah 29:11</span></p>
+      <noscript><p class="no-script">Enable JavaScript to open contact, or write to contact@twentynineeleven.net.</p></noscript>
     </div>
   </main>
+  <button class="motion-toggle" type="button" aria-label="Pause motion" aria-pressed="false" title="Pause motion" hidden>
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path id="motion-icon" d="M7 5v10M13 5v10" /></svg>
+  </button>
   <div class="veil" aria-hidden="true"></div>
   <dialog id="contact-dialog" class="contact-dialog" aria-labelledby="contact-title">
     <div class="dialog-surface">
