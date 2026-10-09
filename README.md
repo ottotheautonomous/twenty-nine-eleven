@@ -1,6 +1,6 @@
 # twenty nine eleven
 
-A single page for security and bespoke systems. Warm ivory, ink, a custom celestial mark, self-hosted typography and subtle [Motion](https://motion.dev/) transitions. One services line. One contact form.
+A centered single page for security and bespoke technology. Obsidian, silver and phosphor green; an original eleven-fold cipher; self-hosted typography; continuous [Motion](https://motion.dev/) animation. One services line and a contact modal. No header or footer.
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
@@ -42,8 +42,11 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 
 - `index.html`: company copy, services and form labels.
 - `src/style.css`: composition, type and color.
-- `src/main.js`: Motion transitions, validation and submission states.
+- `src/main.js`: continuous Motion, dialog transitions, validation and submission states.
+- `src/cipher.js`: original SVG cipher geometry and favicon.
 - `wrangler.jsonc`: email destination restrictions, endpoint and allowed origins.
 - [worker/README.md](worker/README.md): backend details, prerequisites and limitations.
 
-Fonts are Cormorant Garamond and Manrope, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. Motion respects the visitor's reduced-motion preference. At narrow widths the services remain one horizontally scrollable line, with keyboard access.
+Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. The cipher has independent rotating arcs, a travelling illuminated segment, spring pointer response and a motion-pause control. Ambient motion pauses while contact is open or the tab is hidden. Reduced motion renders the finished composition immediately. Compact service labels keep the mobile list on one line.
+
+The native dialog expands from the contact control, traps keyboard focus and restores focus on dismissal. Drafts and pending requests survive closing/reopening. Browser checks use a local email fixture; the real backend activation remains separate.
