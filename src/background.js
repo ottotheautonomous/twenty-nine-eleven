@@ -16,7 +16,13 @@ out vec4 out_color;
 uniform vec2 u_resolution;
 uniform vec2 u_pointer;
 uniform vec2 u_origin;
+uniform vec2 u_focus;
+uniform vec2 u_pulseOrigin;
 uniform float u_time;
+uniform float u_engagement;
+uniform float u_impulse;
+uniform float u_pulsePhase;
+uniform float u_motion;
 
 const vec3 INK = vec3(0.017, 0.028, 0.025);
 const vec3 JADE = vec3(0.43, 0.78, 0.65);
@@ -35,6 +41,11 @@ void main() {
   vec2 pointer = u_pointer * vec2(1.0, -1.0);
   float time = u_time;
   float radius = length(p);
+  vec2 focus = (u_focus - u_origin) * vec2(aspect, -1.0);
+  vec2 pulseOrigin = (u_pulseOrigin - u_origin) * vec2(aspect, -1.0);
+  float localLight = exp(-dot(p - focus, p - focus) / 0.15);
+  float pulseDistance = length(p - pulseOrigin);
+  float pulse = exp(-pow((pulseDistance - u_pulsePhase * 0.72 - 0.04) / 0.085, 2.0)) * u_impulse;
 
   // The distant illumination occupies the frame, including the space between
   // the tapes. Its direction stays coherent with the nearer material.
@@ -50,14 +61,16 @@ void main() {
   float recess = 1.0 - 0.96 * exp(-dot(reading, reading) * 1.45);
   float apertureScale = min(1.0, aspect / 0.85);
   float aperture = smoothstep(0.115 * apertureScale, 0.225 * apertureScale, radius);
-  vec3 light = normalize(vec3(-0.42, 0.73, 0.62));
+  vec3 light = normalize(vec3(-0.42 + pointer.x * 0.45, 0.73 - pointer.y * 0.40, 0.62));
   vec3 view = vec3(0.0, 0.0, 1.0);
 
   // Three translucent depths share a common flow, but have distinct folds.
   // Each angular contour becomes a continuous filament running to the edges.
   for (int i = 0; i < 3; i++) {
     float layer = float(2 - i);
-    vec2 q = p + pointer * (0.016 + layer * 0.008);
+    vec2 q = p + pointer * (0.065 + layer * 0.030);
+    q += pointer * localLight * 0.065 * u_motion;
+    q += (p - pulseOrigin) / max(pulseDistance, 0.01) * pulse * 0.024 * u_motion;
     q.y *= 1.0 + layer * 0.095;
     q.x += sin(q.y * 1.6 + time * 0.075 + layer) * 0.038 * layer;
     float r = max(length(q), 0.018);
@@ -65,7 +78,9 @@ void main() {
     float flow = angle
       + (0.31 + layer * 0.055) * sin(r * 2.0 - angle * 2.0 - time * 0.11 + layer * 0.65)
       + 0.09 * sin(r * 4.3 + angle * 3.0 + time * 0.065 + layer)
-      + (0.32 + layer * 0.085) * smoothstep(0.12, 1.4, r);
+      + (0.32 + layer * 0.085) * smoothstep(0.12, 1.4, r)
+      + dot(pointer, vec2(cos(angle), sin(angle))) * sin(r * 2.5 + layer) * 0.24 * u_motion
+      + sin(angle * 2.0) * u_engagement * u_motion * 0.09;
     float fold = flow * 4.0 + layer * 1.46 + 0.19 * sin(r * 2.1 - time * 0.09);
     float crest = sin(fold) * 0.5 + 0.5;
     float sheet = smoothstep(0.20, 0.39, crest) * (1.0 - smoothstep(0.97, 1.0, crest));
@@ -93,14 +108,17 @@ void main() {
 
     float depth = 1.0 / (1.0 + layer * 0.44);
     float visible = aperture * recess * depth;
-    vec3 material = mineral * (0.032 + diffuse * 0.165 + grazing * 0.075) * shadow;
+    vec3 material = mineral * (0.032 + diffuse * 0.165 + grazing * 0.075) * shadow
+      * (1.0 + u_engagement * 0.30);
     color = mix(color, color * 0.80 + material, sheet * visible * 0.75);
     color += mineral * filament * sheet * visible
       * (0.030 + diffuse * 0.065 + specular * 0.095) * breath;
     color += mineral * (shoulder * 0.40 + farEdge * 0.095) * visible
       * (0.36 + diffuse * 0.64) * breath;
     color += ICE * specular * sheet * visible * 0.11;
+    color += ICE * sheet * visible * (localLight * 0.12 + pulse * 0.11);
   }
+  color += JADE * pool(p, vec2(0.0, 0.0), vec2(0.22, 0.10)) * (0.014 + u_engagement * 0.040);
 
   // A soft falloff keeps the screen feeling deep rather than edge-lit flat.
   float edge = length((uv - 0.5) * vec2(0.78, 0.65));
@@ -142,7 +160,7 @@ function createWebGLRenderer(canvas) {
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('Shader link failed');
     vertexArray = gl.createVertexArray();
     if (!vertexArray) throw new Error('Vertex array allocation failed');
-    const uniforms = Object.fromEntries(['resolution', 'pointer', 'origin', 'time']
+    const uniforms = Object.fromEntries(['resolution', 'pointer', 'origin', 'focus', 'pulseOrigin', 'time', 'engagement', 'impulse', 'pulsePhase', 'motion']
       .map(name => [name, gl.getUniformLocation(program, `u_${name}`)]));
     shaders.forEach(shader => { gl.detachShader(program, shader); gl.deleteShader(shader); });
 
@@ -156,7 +174,13 @@ function createWebGLRenderer(canvas) {
         gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
         gl.uniform2f(uniforms.pointer, state.pointer[0], state.pointer[1]);
         gl.uniform2f(uniforms.origin, state.origin[0], state.origin[1]);
+        gl.uniform2f(uniforms.focus, state.focus[0], state.focus[1]);
+        gl.uniform2f(uniforms.pulseOrigin, state.pulseOrigin[0], state.pulseOrigin[1]);
         gl.uniform1f(uniforms.time, state.time);
+        gl.uniform1f(uniforms.engagement, state.engagement);
+        gl.uniform1f(uniforms.impulse, state.impulse);
+        gl.uniform1f(uniforms.pulsePhase, state.pulsePhase);
+        gl.uniform1f(uniforms.motion, state.motion);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       },
       destroy() {
@@ -249,6 +273,10 @@ function createCanvasRenderer(canvas) {
       const height = canvas.height;
       const originX = state.origin[0] * width;
       const originY = state.origin[1] * height;
+      const focusX = state.focus[0] * width;
+      const focusY = state.focus[1] * height;
+      const pointerStrength = Math.min(1, Math.hypot(...state.pointer));
+      const engagement = state.engagement;
       const scale = Math.hypot(width, height) * 0.94;
       const apertureScale = Math.min(1, width / height / 0.85);
       if (atmosphereContext) {
@@ -260,6 +288,25 @@ function createCanvasRenderer(canvas) {
         context.drawImage(atmosphere, 0, 0);
       } else paintAtmosphere(context, width, height);
 
+      // A visitor-directed reflection is shared by the sheets, then clipped to
+      // each surface. It reads as light on material, rather than a cursor layer.
+      const lightRadius = height * 0.34;
+      const visitorLight = context.createRadialGradient(focusX, focusY, 0, focusX, focusY, lightRadius);
+      visitorLight.addColorStop(0, `rgba(183, 215, 204, ${0.10 + pointerStrength * 0.18 + engagement * 0.13 + state.impulse * 0.12})`);
+      visitorLight.addColorStop(0.42, `rgba(120, 179, 168, ${0.06 + engagement * 0.07})`);
+      visitorLight.addColorStop(1, 'rgba(120, 179, 168, 0)');
+      const pulseX = state.pulseOrigin[0] * width;
+      const pulseY = state.pulseOrigin[1] * height;
+      const pulseRadius = height * (state.pulsePhase * 0.72 + 0.04);
+      const pulseSpread = height * 0.085;
+      let pulseLight = null;
+      if (state.impulse > 0 && state.motion) {
+        pulseLight = context.createRadialGradient(pulseX, pulseY, Math.max(0, pulseRadius - pulseSpread), pulseX, pulseY, pulseRadius + pulseSpread);
+        pulseLight.addColorStop(0, 'rgba(184, 219, 211, 0)');
+        pulseLight.addColorStop(0.45, `rgba(184, 219, 211, ${state.impulse * 0.22})`);
+        pulseLight.addColorStop(1, 'rgba(184, 219, 211, 0)');
+      }
+
       context.lineJoin = 'round';
       context.lineCap = 'round';
       for (const profile of profiles) {
@@ -267,16 +314,31 @@ function createCanvasRenderer(canvas) {
         for (let step = 0; step <= 40; step++) {
           const t = step / 40;
           const radius = height * 0.065 * apertureScale + t * scale;
+          const bend = (state.pointer[0] * Math.sin(t * 2.8 + profile.phase) * 0.24
+            - state.pointer[1] * Math.cos(t * 3.0 - profile.phase) * 0.20) * Math.sin(t * Math.PI * 0.5);
           const angle = profile.angle
             + Math.sin(t * 3.4 + profile.phase + state.time * 0.085) * 0.40
-            + Math.sin(t * 6.1 - profile.phase + state.time * 0.05) * 0.11 + t * 0.20;
+            + Math.sin(t * 6.1 - profile.phase + state.time * 0.05) * 0.11 + t * 0.20 + bend * state.motion;
           const twist = 0.62 + 0.38 * (Math.cos(t * 3.8 + profile.phase - state.time * 0.075) * 0.5 + 0.5);
+          let x = originX + Math.cos(angle) * radius + state.pointer[0] * height * 0.075 * t * profile.depth;
+          let y = originY + Math.sin(angle) * radius * 0.91 + state.pointer[1] * height * 0.060 * t * profile.depth;
+          const focusDx = x - focusX;
+          const focusDy = y - focusY;
+          const focusDistance = Math.hypot(focusDx, focusDy);
+          const local = Math.exp(-Math.pow(focusDistance / (height * 0.38), 2));
+          const pulseDistance = Math.hypot(x - pulseX, y - pulseY);
+          const wave = Math.exp(-Math.pow((pulseDistance - pulseRadius) / pulseSpread, 2)) * state.impulse * state.motion;
+          const deflection = local * pointerStrength * height * 0.055 * state.motion;
+          x += focusDx / Math.max(focusDistance, 1) * deflection;
+          y += focusDy / Math.max(focusDistance, 1) * deflection;
+          // Engagement parts the protective forms around a clearer open passage.
+          x += Math.sign(Math.cos(profile.angle)) * height * 0.095 * engagement * state.motion * Math.sin(t * Math.PI);
           samples.push({
             t,
-            x: originX + Math.cos(angle) * radius + state.pointer[0] * height * 0.024 * t * profile.depth,
-            y: originY + Math.sin(angle) * radius * 0.91 + state.pointer[1] * height * 0.024 * t * profile.depth,
-            width: height * (0.008 + profile.width * Math.pow(t, 0.80) * twist),
-            fold: Math.sin(t * 4.2 + profile.phase - state.time * 0.09),
+            x, y,
+            width: height * (0.008 + profile.width * Math.pow(t, 0.80) * twist)
+              * (1 - engagement * 0.06 * state.motion + wave * 0.09),
+            fold: Math.sin(t * 4.2 + profile.phase - state.time * 0.09) + bend * 1.1 * state.motion,
           });
         }
         for (let index = 0; index < samples.length; index++) {
@@ -293,11 +355,16 @@ function createCanvasRenderer(canvas) {
         const left = samples.map(sample => surfacePoint(sample, -1));
         const right = samples.map(sample => surfacePoint(sample, 1));
         const midpoint = samples[20];
-        const material = context.createLinearGradient(midpoint.x - midpoint.nx * midpoint.width,
-          midpoint.y - midpoint.ny * midpoint.width, midpoint.x + midpoint.nx * midpoint.width,
-          midpoint.y + midpoint.ny * midpoint.width);
+        const reflectedShift = clamp(((focusX - midpoint.x) * midpoint.nx + (focusY - midpoint.y) * midpoint.ny)
+          / Math.max(midpoint.width, 1), -1, 1) * midpoint.width * 0.38;
+        const materialX = midpoint.x + midpoint.nx * reflectedShift;
+        const materialY = midpoint.y + midpoint.ny * reflectedShift;
+        const material = context.createLinearGradient(materialX - midpoint.nx * midpoint.width,
+          materialY - midpoint.ny * midpoint.width, materialX + midpoint.nx * midpoint.width,
+          materialY + midpoint.ny * midpoint.width);
         const palette = palettes[profile.tone];
-        const illumination = (0.78 + 0.14 * Math.sin(state.time * 0.07 + profile.phase)) * profile.depth;
+        const illumination = Math.min(1, (0.78 + 0.14 * Math.sin(state.time * 0.07 + profile.phase))
+          * profile.depth + engagement * 0.16);
         stops.forEach((stop, shade) => {
           const [red, green, blue] = surfacePalettes[profile.tone][shade];
           const r = Math.round(9 + (red - 9) * illumination);
@@ -309,6 +376,16 @@ function createCanvasRenderer(canvas) {
         trace(left); trace([...right].reverse(), false); context.closePath();
         context.fillStyle = material;
         context.fill();
+        context.save();
+        context.clip();
+        context.fillStyle = visitorLight;
+        context.fillRect(focusX - lightRadius, focusY - lightRadius, lightRadius * 2, lightRadius * 2);
+        if (pulseLight) {
+          context.fillStyle = pulseLight;
+          const extent = pulseRadius + pulseSpread;
+          context.fillRect(pulseX - extent, pulseY - extent, extent * 2, extent * 2);
+        }
+        context.restore();
 
         const end = samples.at(-1);
         const detail = context.createLinearGradient(originX, originY, end.x, end.y);
@@ -327,9 +404,9 @@ function createCanvasRenderer(canvas) {
         // Continuous narrow shoulders make the bevel legible at any resolution.
         const shoulder = context.createLinearGradient(originX, originY, end.x, end.y);
         shoulder.addColorStop(0, 'rgba(183, 213, 199, 0)');
-        shoulder.addColorStop(0.10, 'rgba(183, 213, 199, 0.04)');
-        shoulder.addColorStop(0.38, `rgba(${palette[4]}, 0.56)`);
-        shoulder.addColorStop(1, `rgba(${palette[4]}, 0.28)`);
+        shoulder.addColorStop(0.10, `rgba(183, 213, 199, ${0.04 + engagement * 0.23})`);
+        shoulder.addColorStop(0.38, `rgba(${palette[4]}, ${0.56 + engagement * 0.20})`);
+        shoulder.addColorStop(1, `rgba(${palette[4]}, ${0.28 + engagement * 0.12})`);
         context.strokeStyle = shoulder;
         for (const across of [-0.22, 0.93]) {
           context.beginPath();
@@ -347,6 +424,18 @@ function createCanvasRenderer(canvas) {
       aperture.addColorStop(1, 'rgba(8, 12, 11, 0)');
       context.fillStyle = aperture;
       context.fillRect(originX - apertureRadius, originY - apertureRadius, apertureRadius * 2, apertureRadius * 2);
+
+      const horizonWidth = height * 0.22 * apertureScale;
+      const horizonHeight = height * 0.10;
+      context.save();
+      context.translate(originX, originY);
+      context.scale(horizonWidth, horizonHeight);
+      const horizon = context.createRadialGradient(0, 0, 0, 0, 0, 1);
+      horizon.addColorStop(0, `rgba(166, 216, 184, ${0.03 + engagement * 0.09})`);
+      horizon.addColorStop(1, 'rgba(166, 216, 184, 0)');
+      context.fillStyle = horizon;
+      context.fillRect(-1, -1, 2, 2);
+      context.restore();
 
       const readingWidth = Math.min(height * 0.46, width * 0.48);
       const readingHeight = height * 0.35;
@@ -376,14 +465,16 @@ function createCanvasRenderer(canvas) {
  */
 export function createBackground(canvas) {
   const noop = () => {};
-  const inert = { setActive: noop, setPointer: noop, setOrigin: noop, setReducedMotion: noop, resize: noop, destroy: noop };
+  const inert = { setActive: noop, setPointer: noop, setOrigin: noop, setFocus: noop,
+    setEngagement: noop, setImpulse: noop, setReducedMotion: noop, resize: noop, destroy: noop };
   if (!canvas?.getContext || typeof window === 'undefined') return inert;
 
   const originalBackground = canvas.style.background;
   const originalRenderer = canvas.getAttribute('data-renderer');
   const originalActive = canvas.getAttribute('data-active');
   canvas.style.background = STATIC_BACKGROUND;
-  const state = { time: 8.5, pointer: [0, 0], origin: [0.5, 0.34] };
+  const state = { time: 8.5, pointer: [0, 0], origin: [0.5, 0.34], focus: [0.5, 0.5],
+    engagement: 0, impulse: 0, pulsePhase: 0, pulseOrigin: [0.5, 0.5], motion: 1 };
   let renderer = createWebGLRenderer(canvas) || createCanvasRenderer(canvas);
   let desiredActive = false;
   let reducedMotion = false;
@@ -401,6 +492,11 @@ export function createBackground(canvas) {
 
   function draw() {
     if (destroyed || contextLost) return;
+    if (!renderer || renderer.type === 'static') {
+      const illumination = 0.04 + state.engagement * 0.10 + state.impulse * 0.04;
+      canvas.style.background = `radial-gradient(ellipse at ${state.focus[0] * 100}% ${state.focus[1] * 100}%, rgba(147, 199, 183, ${illumination}), transparent 48%), ${STATIC_BACKGROUND}`;
+      return;
+    }
     try { renderer?.draw(state); } catch {
       // A decorative surface must never interrupt the contact form or identity.
       renderer?.destroy();
@@ -431,7 +527,12 @@ export function createBackground(canvas) {
     const elapsed = timestamp - lastDraw;
     if (elapsed >= interval) {
       // Resuming never incorporates the time spent paused or in another tab.
-      state.time += Math.min((timestamp - lastTime) / 1000, 0.08);
+      const seconds = Math.min((timestamp - lastTime) / 1000, 0.08);
+      state.time += seconds;
+      if (state.impulse > 0) {
+        state.pulsePhase += seconds;
+        state.impulse = Math.max(0, state.impulse - seconds * 0.72);
+      }
       lastTime = timestamp;
       lastDraw = timestamp - (elapsed % interval);
       draw();
@@ -500,7 +601,33 @@ export function createBackground(canvas) {
     },
     setPointer(x, y) {
       if (destroyed) return;
-      state.pointer = reducedMotion ? [0, 0] : [clamp(finite(x, 0), -1, 1), clamp(finite(y, 0), -1, 1)];
+      const next = reducedMotion ? [0, 0] : [clamp(finite(x, 0), -1, 1), clamp(finite(y, 0), -1, 1)];
+      if (next[0] === state.pointer[0] && next[1] === state.pointer[1]) return;
+      state.pointer = next;
+      if (!canAnimate()) draw();
+    },
+    setFocus(x, y) {
+      if (destroyed) return;
+      const nextX = clamp(finite(x, 0.5), 0, 1);
+      const nextY = clamp(finite(y, 0.5), 0, 1);
+      if (nextX === state.focus[0] && nextY === state.focus[1]) return;
+      state.focus = [nextX, nextY];
+      if (!canAnimate()) draw();
+    },
+    setEngagement(value) {
+      if (destroyed) return;
+      const next = clamp(finite(value, 0), 0, 1);
+      if (next === state.engagement) return;
+      state.engagement = next;
+      if (!canAnimate()) draw();
+    },
+    setImpulse(value = 1) {
+      if (destroyed) return;
+      const next = clamp(finite(value, 0), 0, 1);
+      if (next === 0 && state.impulse === 0) return;
+      state.impulse = next;
+      state.pulsePhase = 0;
+      state.pulseOrigin = [...state.focus];
       if (!canAnimate()) draw();
     },
     setOrigin(x, y) {
@@ -511,6 +638,7 @@ export function createBackground(canvas) {
     setReducedMotion(reduced) {
       if (destroyed) return;
       reducedMotion = Boolean(reduced);
+      state.motion = reducedMotion ? 0 : 1;
       if (reducedMotion) state.pointer = [0, 0];
       syncActivity();
       draw();

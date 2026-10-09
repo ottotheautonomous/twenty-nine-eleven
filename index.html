@@ -15,35 +15,36 @@
   <canvas id="world" class="world" aria-hidden="true"></canvas>
   <main class="scene" aria-labelledby="company-name">
     <div class="stage">
-      <div class="cipher-object">
+      <div class="cipher-object" data-react="shelter">
         <div class="cipher-light" aria-hidden="true"></div>
         <div class="cipher-plane" aria-hidden="true"><svg id="cipher" viewBox="0 0 320 320" fill="none"></svg></div>
         <button class="motion-toggle" type="button" aria-label="Pause animation" aria-pressed="false" title="Pause animation" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path id="motion-icon" d="M7 5v10M13 5v10" /></svg>
         </button>
       </div>
-      <h1 id="company-name" aria-label="Twenty Nine Eleven">
+      <h1 id="company-name" aria-label="Twenty Nine Eleven" data-react="identity">
         <span class="name-mask"><span class="name-line">TWENTY NINE</span></span>
         <span class="name-mask"><span class="name-line name-second">ELEVEN</span></span>
       </h1>
-      <p class="work-type" data-enter>Security <span>&</span> bespoke technology</p>
+      <p class="purpose" data-enter data-react="purpose"><span>Hope &amp; a future.</span><span class="verse-reference">Jeremiah 29:11</span></p>
+      <p class="work-type" data-enter data-react="work">Security <span>&</span> bespoke technology</p>
       <ul class="services" aria-label="Security and infrastructure" data-enter>
-        <li><span class="service-full">Penetration testing</span><span class="service-short">Pentesting</span></li>
-        <li>Networks</li>
-        <li><span class="service-full">Access control</span><span class="service-short">Access</span></li>
-        <li>Cameras</li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Penetration testing" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Penetration testing</span><span class="service-short">Pentesting</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Networks" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>Networks</button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Access control" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Access control</span><span class="service-short">Access</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Cameras" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>Cameras</button></li>
       </ul>
       <ul class="services services-secondary" aria-label="Fabrication, intelligence and creative work" data-enter>
-        <li>CNC</li>
-        <li><span class="service-full">Fabrication</span><span class="service-short">Fab</span></li>
-        <li><span class="service-full">Applied AI</span><span class="service-short">AI</span></li>
-        <li><span class="service-full">Computer vision</span><span class="service-short">Vision</span></li>
-        <li><span class="service-full">Software</span><span class="service-short">Code</span></li>
-        <li><span class="service-full">Creative production</span><span class="service-short">Media</span></li>
-        <li>Design</li>
+        <li><button class="service-control" type="button" data-react="service" data-service="CNC" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>CNC</button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Fabrication" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Fabrication</span><span class="service-short">Fab</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Applied AI" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Applied AI</span><span class="service-short">AI</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Computer vision" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Computer vision</span><span class="service-short">Vision</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Software" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Software</span><span class="service-short">Code</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Creative production" aria-haspopup="dialog" aria-controls="contact-dialog" disabled><span class="service-full">Creative production</span><span class="service-short">Media</span></button></li>
+        <li><button class="service-control" type="button" data-react="service" data-service="Design" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>Design</button></li>
       </ul>
       <div class="contact-trigger-shell" data-enter>
-        <button id="open-contact" class="contact-trigger" type="button" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>
+        <button id="open-contact" class="contact-trigger" data-react="contact" type="button" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>
           <span>Start a conversation</span>
           <svg class="contact-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5" /></svg>
           <span class="contact-rule" aria-hidden="true"></span>

@@ -1,6 +1,8 @@
 # twenty nine eleven
 
-A centered single page for security and bespoke technology. A full viewport of moving mineral surfaces, a balanced eleven-sector metal cipher, self-hosted typography and [Motion](https://motion.dev/) spring interactions. Two capability rows and a contact modal. No header or footer.
+A centered single page for security and bespoke technology. An open architectural shelter frames a path toward dawn, surrounded by a visitor-responsive surface field. Self-hosted typography and [Motion](https://motion.dev/) springs connect the artwork, lettering, capability controls and contact modal. Two capability rows. No header or footer.
+
+The scene is a design interpretation of the owner's Jeremiah 29:11 naming and helping-people brief: supportive protection, hope and a way forward. The quiet “Hope & a future” reference draws from [Jeremiah 29:11](https://www.biblegateway.com/passage/?search=Jeremiah+29%3A11&version=NIV). It expresses the supplied values without adding other beliefs or promises.
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
@@ -43,13 +45,13 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 - `index.html`: company copy, services and form labels.
 - `src/style.css`: composition, type and color.
 - `src/main.js`: continuous Motion, dialog transitions, validation and submission states.
-- `src/cipher.js`: original SVG cipher geometry and favicon.
+- `src/cipher.js`: authored shelter, dawn/path geometry and favicon.
 - `src/background.js`: viewport surface field, WebGL/Canvas rendering and activity controls.
 - `wrangler.jsonc`: email destination restrictions, endpoint and allowed origins.
 - [worker/README.md](worker/README.md): backend details, prerequisites and limitations.
 
-Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. The cipher has balanced metallic facets, independent rotating arcs, a travelling illuminated segment and spring pointer response. Every rotating SVG layer uses the same viewBox center; the rune stays fixed at the center of the instrument.
+Fonts are Space Grotesk and IBM Plex Mono, distributed under their respective SIL Open Font Licenses through Fontsource. Dependencies are locked; font files ship with the page. The sculpture stays grounded while its protective shoulders part slightly, its dawn/path light responds to intent, and the shared camera reacts to the visitor. Typography receives the same moving light and restrained depth response.
 
-The whole viewport renders a continuous folded surface field, using WebGL2 when available and shaded Canvas2D ribbons otherwise. The field follows the cipher's viewport position and the Motion-smoothed pointer. Backing resolution is capped at 2.8 million pixels. A centered pause control stops the field and glyph loops together. Ambient motion also pauses while contact is open or the tab is hidden; reduced motion renders a still composition. Compact labels keep each capability row on one line on mobile.
+The whole viewport renders a continuous folded surface field, using WebGL2 when available and shaded Canvas2D ribbons otherwise. Motion-smoothed pointer and touch position bend its geometry, shift localized reflections and release a restrained tap impulse. Keyboard focus gives equivalent lighting/intent feedback. Backing resolution is capped at 2.8 million pixels. Pause/reduced motion stop spatial and ambient animation while retaining immediate color feedback. Ambient motion also pauses while contact is open or the tab is hidden. Touch scrolling is preserved. Compact labels keep each capability row on one line on mobile.
 
-The native dialog expands from the contact control, traps keyboard focus and restores focus on dismissal. Drafts and pending requests survive closing/reopening. Browser checks use a local email fixture; the real backend activation remains separate.
+Each capability label can open the native contact dialog from that control and prefill an empty message with the chosen topic. Existing drafts are preserved. The dialog traps keyboard focus and restores it to the originating control. Drafts and pending requests survive closing/reopening. Browser checks use a local email fixture; the real backend activation remains separate.
