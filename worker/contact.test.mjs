@@ -245,3 +245,39 @@ test('Unicode and HTML-like message text stay plain text and surrounding whitesp
   assert.ok(sent[0].text.includes('<script>alert(1)</script> — café\n第二行'));
   assert.equal(sent[0].html, undefined);
 });
+
+test('IPv6 visitors share one rate-limit bucket per /64; IPv4 keys are unchanged', async () => {
+  const { ipKey } = await import('./index.mjs');
+  assert.equal(ipKey('192.0.2.10'), 'contact:192.0.2.10');
+  assert.equal(ipKey('2001:db8::1'), ipKey('2001:db8::2'));
+  assert.equal(ipKey('2001:db8::1'), ipKey('2001:db8:0:0:ffff::9'));
+  assert.notEqual(ipKey('2001:db8::1'), ipKey('2001:db8:1::1'));
+  assert.equal(ipKey(null), 'contact:unknown');
+});
+
+test('a global cap refuses delivery when every visitor together exceeds it', async () => {
+  const { env, sent } = environment({ GLOBAL_LIMITER: { limit: async () => ({ success: false }) } });
+  const result = await worker.fetch(request(), env);
+  assert.equal(result.status, 503);
+  assert.equal(sent.length, 0);
+});
+
+test('names that could pose as an address or forge a line, and non-plain emails, are rejected', async () => {
+  const badNames = ['Bank Support" <security@bank.example>, x', 'ceo<at>example', 'Jane Email: forged@example.com', 'Jane\u0085x', 'Jane‮evil', 'Back\\slash'];
+  const badEmails = ['a,b@evil.example', '"x"(c)@evil.example', 'x@evil.example,victim.example', 'x@evil', 'x y@evil.example'];
+  for (const name of badNames) {
+    const { env, sent } = environment();
+    assert.equal((await worker.fetch(request({ ...valid, name }), env)).status, 400, name);
+    assert.equal(sent.length, 0);
+  }
+  for (const email of badEmails) {
+    const { env, sent } = environment();
+    assert.equal((await worker.fetch(request({ ...valid, email }), env)).status, 400, email);
+    assert.equal(sent.length, 0);
+  }
+  for (const name of ["Siobhán O'Brien-Ng", 'Zoë', 'José Martínez', '张伟']) {
+    const { env, sent } = environment();
+    assert.equal((await worker.fetch(request({ ...valid, name }), env)).status, 200, name);
+    assert.equal(sent.length, 1);
+  }
+});

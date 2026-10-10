@@ -11,6 +11,22 @@ const DEFAULT_ORIGINS = [
   'https://www.twentynineeleven.net',
 ];
 
+// Names reach the email's Reply-To display name: no controls (C0/C1 incl. NEL), no format/bidi/zero-width characters,
+// no line/paragraph separators and no address specials, so a name can neither look like an address nor forge a line.
+const BAD_NAME = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u;
+// A plain addr-spec only (no quoted local parts, comments, commas or multiple addresses).
+const EMAIL = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+
+// One rate-limit bucket per IPv4 address and per IPv6 /64 (a single host can rotate through its whole /64).
+export function ipKey(ip) {
+  if (!ip) return 'contact:unknown';
+  if (!ip.includes(':')) return `contact:${ip}`;
+  const [h, t = ''] = ip.toLowerCase().split('::');
+  const head = h.split(':').filter(Boolean), tail = t.split(':').filter(Boolean);
+  const full = [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail];
+  return `contact:${full.slice(0, 4).map((x) => x.padStart(4, '0')).join(':')}::/64`;
+}
+
 function allowedOrigins(env) {
   // Optional comma-separated deployment setting; never accept an origin from the request body.
   return new Set(
@@ -80,10 +96,8 @@ function validate(payload) {
   const cleanEmail = email.trim();
   const cleanMessage = message.trim();
   if (
-    !cleanName || cleanName.length > MAX_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(cleanName) ||
-    !cleanEmail || cleanEmail.length > MAX_EMAIL_LENGTH ||
-    !/^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/.test(cleanEmail) ||
-    /[\u0000-\u001f\u007f]/.test(cleanEmail) ||
+    !cleanName || cleanName.length > MAX_NAME_LENGTH || BAD_NAME.test(cleanName) ||
+    !cleanEmail || cleanEmail.length > MAX_EMAIL_LENGTH || !EMAIL.test(cleanEmail) ||
     cleanMessage.length < 10 || cleanMessage.length > MAX_MESSAGE_LENGTH ||
     /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(cleanMessage) ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
@@ -136,13 +150,18 @@ export default {
     // Cloudflare supplies CF-Connecting-IP at the edge. Missing values share a conservative bucket.
     // This binding is shared across Worker isolates, unlike an in-memory JavaScript counter.
     try {
-      const result = await env.RATE_LIMITER.limit({
-        key: `contact:${request.headers.get('cf-connecting-ip') || 'unknown'}`,
-      });
+      const result = await env.RATE_LIMITER.limit({ key: ipKey(request.headers.get('cf-connecting-ip')) });
       if (result?.success !== true) {
         return response(429, { error: 'Please wait a minute before trying again.' }, origin, {
           'Retry-After': '60',
         });
+      }
+      // A global cap across every visitor: a botnet cannot flood the inbox or exhaust the sending quota.
+      if (env.GLOBAL_LIMITER) {
+        const all = await env.GLOBAL_LIMITER.limit({ key: 'contact:all' });
+        if (all?.success !== true) {
+          return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin, { 'Retry-After': '60' });
+        }
       }
     } catch {
       return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin);
