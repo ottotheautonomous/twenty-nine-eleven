@@ -58,12 +58,15 @@ export function prepareDecode(el, { lockWidth = false } = {}) {
 export function decode(el, {
   duration = 0.75, alphaDuration = 0.4, delay = 0, ease = SINE_OUT,
   steps = 5.75, glyphs = GLYPHS, lockWidth = false, reduced = reducedMotion(), fraction = 1,
+  alpha = true,            // false: glyphs never fade (a value that must never vanish, e.g. the integrity digits)
+  lock = null,             // (char, i) => true keeps that glyph fixed, like a space (e.g. the "0." of a reading)
 } = {}) {
   const st = prepareDecode(el, { lockWidth });
   stopDecode(el);
+  st.chars.forEach((c, i) => { c.seed = (Math.random() * 997) | 0; c.roll = Math.random(); c.locked = lock ? lock(c.final, i) : false; });   // a fresh scramble every time
   const gen = ++st.gen;                  // stale completions from an earlier call are ignored
-  const n = st.chars.length;
-  const p = { a: 0, s: 0 };
+  const n = st.chars.length, useAlpha = alpha;
+  const p = { a: useAlpha ? 0 : 1, s: 0 };
   let dirty = true;
 
   const paint = () => {
@@ -74,8 +77,9 @@ export function decode(el, {
       const w = n > 1 ? i / n : 0;
       const alpha = Math.min(Math.max((p.a * 1.1 - w) / 0.1, 0), 1);
       const local = Math.min(Math.max(p.s * 2 - w, 0), 1);
-      const g = c.space || local >= 1 || c.roll >= fraction ? c.final : glyphs[(c.seed + Math.floor((1 - local) * steps)) % glyphs.length];
+      const g = c.space || c.locked || local >= 1 || c.roll >= fraction ? c.final : glyphs[(c.seed + Math.floor((1 - local) * steps)) % glyphs.length];
       if (g !== c.shown) { c.el.textContent = g; c.shown = g; }
+      if (!useAlpha) continue;
       const op = String(alpha);
       if (c.el.style.opacity !== op) c.el.style.opacity = op;
     }

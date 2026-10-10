@@ -91,7 +91,7 @@ styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(verseSurface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 model.state.onFrame = () => {
   nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3);
-  if (integrityLive) labels.setIntegrity(model.state.integrity);
+  if (integrityLive) labels.setIntegrity(model.state.integrity, model.state.deficit > 0);   // every frame while the ledger is open
 };
 model.state.onGreet = lon => { if (!still()) { ring(lon); boost('u_boostGreet', .15, .6); } };
 model.state.onState = word => { if (current?.name !== 'verse') labels.setState(word); };   // the verse holds PURPOSE until it closes

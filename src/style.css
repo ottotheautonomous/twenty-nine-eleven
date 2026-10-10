@@ -57,9 +57,7 @@ html:not(.js) .mark-still, html[data-renderer='static'] .mark-still { display: b
 .instrument-key { margin-right: .6em; }
 .instrument-integrity { order: 1; } .instrument-state { order: 2; } .instrument-findings { order: 3; }
 .instrument-state::before, .instrument-findings:not(:empty)::before { content: '·'; margin: 0 .6em; opacity: .65; }
-.instrument.has-finding .instrument-state { order: 0; } .instrument.has-finding .instrument-integrity { order: 1; }
-.instrument.has-finding .instrument-state::before { content: none; }
-.instrument.has-finding .instrument-integrity::before { content: '·'; margin: 0 .6em; opacity: .65; }
+.instrument-state { flex: none; min-width: 7.9em; }   /* a fixed HUD field: "· RESTORING" (10 glyphs at .67em + 1.2em) fits, so no state word ever moves FINDINGS */
 
 h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em; margin: 0; font-size: clamp(42px, 4.9vw, 70px); font-weight: 500; line-height: .95; letter-spacing: -.025em; text-shadow: 0 2px 30px #03081099; }
 .name-mask { display: inline-block; overflow: hidden; padding: .06em .04em .12em; margin: -.06em -.04em -.12em; }

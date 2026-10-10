@@ -23,7 +23,7 @@ export function createLabels(root, instrument, shape) {
   const valueEl = q('.instrument-value'), stateEl = q('.instrument-state'), findingsEl = q('.instrument-findings');
   const bound = new Map();
   const tmp = [0, 0, 0];
-  let lastIntegrity = 0, findingNode = -1, stateWord = 'STANDBY';
+  let lastIntegrity = 0, findingNode = -1, stateWord = 'STANDBY', rolling = false;
   for (const el of instrument?.querySelectorAll('.instrument-key, .instrument-label') ?? []) el.dataset.text ??= el.textContent;
   tier0.__on = false;
 
@@ -100,13 +100,21 @@ export function createLabels(root, instrument, shape) {
     if (tier0.__on) tier0.style.transform = `translate3d(${Math.round(ex)}px, ${Math.round(items.length ? ey - 34 : ey + 28)}px, 0)`;
   }
 
+  // force: write every frame (while the ledger is open); otherwise 10 Hz. Writes only when the 3-digit text changes.
   function setIntegrity(v, force = false) {
-    if (!valueEl) return;
+    if (!valueEl || rolling) return;
     const now = performance.now();
     if (!force && now - lastIntegrity < 100) return;
     lastIntegrity = now;
     const text = v.toFixed(3);
     if (valueEl.textContent !== text) valueEl.textContent = text;
+  }
+  // The release: the digits after the point roll in place to the new value (odometer); "0." never scrambles, nothing fades.
+  function rollIntegrity(v) {
+    if (!valueEl) return;
+    rolling = true;
+    decodeText(valueEl, v.toFixed(3), { duration: 0.3, alpha: false, glyphs: '0123456789', steps: 7, fraction: 1, lock: (ch, i) => i < 2 })
+      .then(() => { rolling = false; });
   }
   function setState(word) { stateWord = word; if (stateEl) decodeText(stateEl, word, { duration: 0.4, alphaDuration: 0.2, fraction: 0.6 }); }
   function setFindings(node) {
@@ -132,5 +140,5 @@ export function createLabels(root, instrument, shape) {
   function blinkIntegrity(from = 0.9, to = 0.998) {
     return animate(0, 5, { duration: 0.5, ease: 'linear', onUpdate: (v) => setIntegrity(from + (to - from) * Math.floor(v) / 5, true), onComplete: () => setIntegrity(to, true) });
   }
-  return { position, setIntegrity, setState, setFindings, showTier0, hideAll, decodeInstrument, countIn, blinkIntegrity };
+  return { position, setIntegrity, rollIntegrity, setState, setFindings, showTier0, hideAll, decodeInstrument, countIn, blinkIntegrity };
 }

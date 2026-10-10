@@ -2,7 +2,8 @@ import { createPointerFilter, createCascade, frameRatio, friction, clamp, smooth
 import { createPlexusLogic } from './plexus.js';
 import { createCameraState, computeCamera, screenToWorldOnCentrePlane } from './camera.js';
 import { FINDING } from './shape.js';
-import { LAG, EXPOSURE, ORBIT, TIMING, INTEGRITY, TEAR, NODES } from './constants.js';
+import { LAG, EXPOSURE, ORBIT, TIMING, INTEGRITY, RESET, TEAR, NODES } from './constants.js';
+const inOut3 = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 
 // The interaction model: GL-free and authoritative for everything the DOM shows. Both renderers read it.
 // Chain of lags (each response lands on its own beat): smoothed pointer 0.33 s -> lag velocity 0.83 s ->
@@ -100,6 +101,8 @@ export function createModel(shape, uniforms) {
     forcedNode: -1, tapNodes: [], tapUntil: 0, aspect: 16 / 9,
     present: 0, crossedAt: -1e9, entered: false,
     probeVel: [0, 0, 0], lastProbeRaw: [0, 0, 0], poke: 0, probeJump: false, handDir: [0, 0, -1],
+    // the integrity ledger and the reset (see INTEGRITY / RESET)
+    quietSince: -1e9, damage: 0, deficit: 0, resetting: false, released: false, rollUntil: 0, resetT: -1, front: -10, resetAmp: 0, ampS: 0,
   };
   const eyeDir = [0, 0, -1], tmp3 = [0, 0, 0];
 
@@ -174,14 +177,34 @@ export function createModel(shape, uniforms) {
       gridSeg.acc += ratio; gridSeg.radius = Math.max(gridSeg.radius, s.trail.radius);
       if (gridSeg.acc >= 0.999) {
         const r = gridSeg.acc < 1.5 ? Math.min(gridSeg.acc, 1) : gridSeg.acc, n = r > 1.5 ? Math.round(r) : 1;
-        const seg = { ax: gridSeg.ax, ay: gridSeg.ay, bx: s.trail.bx, by: s.trail.by, radius: gridSeg.radius };
-        for (let q = 0; q < n; q++) trailGrid.step(seg, r / n, s.aspect);
+        const ax = gridSeg.ax, ay = gridSeg.ay, ex = s.trail.bx - ax, ey = s.trail.by - ay;   // catch-up ticks split the segment
+        for (let q = 0; q < n; q++) trailGrid.step({ ax: ax + ex * q / n, ay: ay + ey * q / n, bx: ax + ex * (q + 1) / n, by: ay + ey * (q + 1) / n, radius: gridSeg.radius }, r / n, s.aspect);
         gridSeg.acc = Math.max(0, gridSeg.acc - r); gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
       }
     }
     const meanDisc = trailGrid.meanInside(cam.shellPx, view.width, view.height);
-    s.tear = Math.min(1, meanDisc / INTEGRITY.tearRef);
-    s.integrity = clamp(INTEGRITY.rest - INTEGRITY.slope * meanDisc, INTEGRITY.floor, INTEGRITY.rest);
+    if (s.trail.radius > 0) s.quietSince = s.time;
+    {
+      const I = INTEGRITY, quiet = s.time - s.quietSince, span = I.rest - I.floor;
+      if (quiet < I.quiet) {                                                     // under the hand: the ledger only grows
+        if (s.resetting) { s.resetting = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.onReset?.('abort', I.rest - s.deficit, 0); }
+        if (quiet < I.active && s.simulate) s.damage += I.acc * meanDisc * (1 - s.damage) * dt;
+        s.deficit = Math.min(span, Math.max(s.deficit, I.liveCap * (1 - Math.exp(-I.live * meanDisc / I.liveCap)), span * s.damage));
+      } else if (!s.resetting && s.deficit > 0.01) {                             // a second of quiet: the reset fires
+        s.resetting = true; s.released = false; s.resetT = 0; s.front = 0;
+        s.resetAmp = s.deficit >= I.event ? 0.5 + 0.5 * Math.min(1, s.deficit / 0.3) : 0;   // scales with depth; trivial damage is silent
+        s.onReset?.('start', I.rest - s.deficit, s.resetAmp);
+      } else if (s.resetting) {
+        if (s.resetT >= 0) { s.resetT = Math.min(1, s.resetT + dt / I.wave); s.front = RESET.front * inOut3(s.resetT); if (s.resetT >= 1) { s.resetT = -1; s.front = -10; } }
+        if (!s.released && (s.resetAmp === 0 || s.front >= 1 || s.resetT < 0)) {   // the front crosses the shell: one decisive release
+          s.released = true; s.deficit *= 1 - I.release; s.rollUntil = s.time + (s.resetAmp > 0 ? I.roll : 0);
+          s.onReset?.('release', I.rest - s.deficit, s.resetAmp);
+        } else if (s.released && s.time >= s.rollUntil) s.deficit *= Math.pow(0.5, dt / I.heal);   // the slow climb
+        if (s.released && s.deficit < I.sealAt) { s.deficit = 0; s.damage = 0; s.resetting = false; s.onReset?.('sealed', I.rest, s.resetAmp); s.resetAmp = 0; }
+      } else { s.damage = 0; s.deficit = 0; }
+      s.integrity = I.rest - s.deficit;
+      s.tear = Math.min(1, Math.max(meanDisc / I.tearRef, s.deficit / 0.45));   // the ember stays dimmed by the ledger until it seals
+    }
     // 5b. a tear = one fast pass across the shell; re-armed once the probe calms
     {
       const sh = cam.shellPx, W = view.width, H = view.height;
@@ -250,6 +273,7 @@ export function createModel(shape, uniforms) {
   function drawStill(view) {
     pf.set(0, 0.1); pf.state.vel = 0; orbit.forEach((c) => c.set(0)); lean.forEach((c) => c.set(0));
     s.vel = 0; s.yaw = 0; s.pitch = 0; s.tear = 0; s.integrity = INTEGRITY.rest; s.labels.length = 0; s.linkAlpha = 0;
+    s.quietSince = -1e9; s.damage = 0; s.deficit = 0; s.resetting = false; s.released = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.ampS = 0;
     s.probeS[0] = s.probeS[1] = s.probeS[2] = 0; s.orbitNorm[0] = s.orbitNorm[1] = 0;
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;
     s.poke = 0; s.probeJump = true; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
@@ -280,6 +304,7 @@ export function createModel(shape, uniforms) {
     s.trail.pressDisc = true;
     s.trail.ax = s.trail.bx = nx * 0.5 + 0.5; s.trail.ay = s.trail.by = ny * 0.5 + 0.5;
     if (s.simulate) trailGrid.disc(s.trail.ax, s.trail.ay, 0.06, s.aspect);
+    s.quietSince = s.time;                                   // a press is a hit
     gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
   }
   function tap(nx, ny) {
