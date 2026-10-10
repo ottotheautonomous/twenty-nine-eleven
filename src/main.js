@@ -8,6 +8,8 @@ import { RESET } from './scene/constants.js';
 import { decode, stopDecode } from './scene/decode.js';
 import { wrapWords } from './verse-light.js';
 
+// Never run inside someone else's frame (clickjacking): a meta CSP cannot set frame-ancestors on GitHub Pages.
+if (window.top !== window.self) document.documentElement.style.display = 'none';
 const $ = selector => document.querySelector(selector);
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const root = document.documentElement;
