@@ -187,7 +187,7 @@ export function createModel(shape, uniforms) {
     if (motion && s.simulate) {
       gridSeg.acc += ratio; gridSeg.radius = Math.max(gridSeg.radius, s.trail.radius);
       if (gridSeg.acc >= 0.999) {
-        const r = gridSeg.acc < 1.5 ? Math.min(gridSeg.acc, 1) : gridSeg.acc, n = r > 1.5 ? Math.round(r) : 1;
+        const n = Math.max(1, Math.floor(gridSeg.acc + 1e-3)), r = n;   // whole ticks only; the remainder carries (72/75 fps no longer over-tick)
         const ax = gridSeg.ax, ay = gridSeg.ay, ex = s.trail.bx - ax, ey = s.trail.by - ay;   // catch-up ticks split the segment
         for (let q = 0; q < n; q++) trailGrid.step({ ax: ax + ex * q / n, ay: ay + ey * q / n, bx: ax + ex * (q + 1) / n, by: ay + ey * (q + 1) / n, radius: gridSeg.radius }, r / n, s.aspect);
         gridSeg.acc = Math.max(0, gridSeg.acc - r); gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
