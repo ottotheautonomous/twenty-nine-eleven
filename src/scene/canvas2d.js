@@ -5,7 +5,7 @@ import { hexRGB, COLORS, NODES } from './constants.js';
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
 const TONES = [COLORS.shadow, COLORS.mid, COLORS.hi, COLORS.rim].map(hexRGB);
-const RADII = [2.0, 3.0, 4.0];                       // CSS px; multiplied by the backing scale
+const RADII = [1.5, 2.2, 3.0];                       // CSS px; multiplied by the backing scale
 const BUCKETS = [0.05, 0.1, 0.18, 0.28, 0.38];         // globalAlpha per intensity bucket
 
 function makeSprite(r, rgb) {
@@ -14,7 +14,7 @@ function makeSprite(r, rgb) {
   const g = c.getContext('2d'), m = size / 2;
   const grad = g.createRadialGradient(m, m, 0, m, m, r);
   const [R, G, B] = rgb.map((x) => Math.round(x * 255));
-  grad.addColorStop(0, `rgba(${R},${G},${B},1)`); grad.addColorStop(0.55, `rgba(${R},${G},${B},0.55)`); grad.addColorStop(1, `rgba(${R},${G},${B},0)`);
+  grad.addColorStop(0, `rgba(${R},${G},${B},1)`); grad.addColorStop(0.35, `rgba(${R},${G},${B},0.85)`); grad.addColorStop(0.7, `rgba(${R},${G},${B},0.2)`); grad.addColorStop(1, `rgba(${R},${G},${B},0)`);   // hard core, short skirt
   g.fillStyle = grad; g.fillRect(0, 0, size, size);
   return c;
 }
@@ -162,12 +162,13 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       if (speed > 0.004 || tr2 > 0.25 || d2[i] > 0.45) tn = 3;
       // perspective size: nearer sprites larger; energy-conserving intensity
       const depth = w > 0 ? cam.dist / w : 1;
-      const sizeF = depth * grow;
+      const grain = (r * 13.7) % 1;                    // per-particle grain, fixed for life
+      const sizeF = depth * grow * (0.75 + 0.55 * grain);
       sizeIdx[i] = sizeF < 0.97 ? 0 : sizeF < 1.08 ? 1 : 2;
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
-      inten[i] = dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
+      inten[i] = (0.6 + 0.9 * grain) * dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----
@@ -240,7 +241,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const qw = Math.max(1, Math.round(bw / 4)), qh = Math.max(1, Math.round(bh / 4));
       if (small.width !== qw || small.height !== qh) { small.width = qw; small.height = qh; }
       sctx.globalCompositeOperation = 'copy'; sctx.drawImage(layer, bx, by, bw, bh, 0, 0, qw, qh);
-      ctx.globalAlpha = 0.35; ctx.drawImage(small, 0, 0, qw, qh, bx, by, bw, bh); ctx.globalAlpha = 1;
+      ctx.globalAlpha = 0.2; ctx.drawImage(small, 0, 0, qw, qh, bx, by, bw, bh); ctx.globalAlpha = 1;
     }
     ctx.globalCompositeOperation = 'source-over';
     if (u.u_dim.value > 0) { ctx.fillStyle = `rgba(0,0,0,${0.5 * u.u_dim.value})`; ctx.fillRect(0, 0, W, H); }
