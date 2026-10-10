@@ -24,8 +24,9 @@ export const TIMING = { greet: 0.6, lose: 1.5, tier0Dwell: 0.4, tier0Radius: 0.3
 export const INTEGRITY = { rest: 0.998, floor: 0.12, live: 1.6, liveCap: 0.3, acc: 0.78, active: 0.1, quiet: 1.0,
                            event: 0.09, release: 0.35, roll: 0.3, heal: 0.85, sealAt: 0.002, wave: 1.2, tearRef: 0.3 };
 // The resync front: a ring leaving the ember across the visible disc (view-space radius), front * inOut3(t) over INTEGRITY.wave s. kick: velocity toward
-// home as it passes; seal: per-60 Hz-frame fraction of trail cleared behind it; boost/grow: the tap's own light; ember: core pulse.
-export const RESET = { front: 2.4, band: 0.14, kick: 0.012, seal: 0.35, boost: 1.5, grow: 0.3, ember: 0.4 };   // ember: v1's click flare (0.4, 0.6 s)
+// home as it passes; seal: per-60 Hz-frame fraction of trail cleared behind it; ember: core pulse (v1's click flare, 0.6 s).
+// The ring's light is in RENDER_VS (x0.5 of the tap's boost, the tap's growth) and canvas2d.js.
+export const RESET = { front: 2.4, band: 0.14, kick: 0.012, seal: 0.35, ember: 0.4 };
 // A tear is one fast pass: the raw probe path crossed the shell within `window` s while lag velocity exceeded `vel`; re-armed below `calm`.
 export const TEAR = { vel: 0.35, window: 0.8, calm: 0.15, read: 0.15 };   // read: the finding latches once the hand is calm (= re-arm)
 export const COLORS = { ink: '#06080B', haze: '#0E1219', slate: '#383E4E', shadow: '#2A313A', mid: '#9AA7B4', hi: '#C3CDD6', rim: '#D7E9F7', ember: '#F0A65E', hot: '#FFD8A6', breach: '#E5484D' };

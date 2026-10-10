@@ -198,7 +198,7 @@ export function createModel(shape, uniforms) {
     {
       const I = INTEGRITY, quiet = s.time - s.quietSince, span = I.rest - I.floor;
       if (quiet < I.quiet) {                                                     // under the hand: the ledger only grows
-        if (s.resetting) { s.damage = Math.min(s.damage, s.deficit / span); s.resetting = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.onReset?.('abort', I.rest - s.deficit, 0); }   // the ledger keeps what it healed
+        if (s.resetting) { s.damage = Math.min(s.damage, s.deficit / span); s.resetting = false; s.resetT = -1; s.resetAmp = 0; s.onReset?.('abort', I.rest - s.deficit, 0); }   // the ledger keeps what it healed; the ring fades where it stands
         if (quiet < I.active && s.simulate) s.damage += I.acc * meanDisc * (1 - s.damage) * dt;
         s.deficit = Math.min(span, Math.max(s.deficit, I.liveCap * (1 - Math.exp(-I.live * meanDisc / I.liveCap)), span * s.damage));
       } else if (!s.resetting && s.deficit > 0.01) {                             // a second of quiet: the reset fires
@@ -216,6 +216,7 @@ export function createModel(shape, uniforms) {
       s.integrity = I.rest - s.deficit;
       s.tear = Math.min(1, Math.max(meanDisc / I.tearRef, s.deficit / 0.45));   // the ember stays dimmed by the ledger until it seals
       s.ampS += ((s.resetT >= 0 && s.simulate ? s.resetAmp : 0) - s.ampS) * (1 - Math.pow(0.7, ratio));   // 6-frame in/out: an abort never pops
+      if (s.resetT < 0 && s.ampS < 1e-3) s.front = -10;
       if (s.resetT >= 0 && s.ampS > 1e-3) trailGrid.seal(cam.shellPx.x, cam.shellPx.y, s.front * cam.shellPx.r, view.width, view.height, 1 - Math.pow(1 - RESET.seal * s.ampS, ratio));
     }
     // 5b. a tear = one fast pass across the shell; re-armed once the probe calms
@@ -286,6 +287,7 @@ export function createModel(shape, uniforms) {
   function drawStill(view) {
     pf.set(0, 0.1); pf.state.vel = 0; orbit.forEach((c) => c.set(0)); lean.forEach((c) => c.set(0));
     s.vel = 0; s.yaw = 0; s.pitch = 0; s.tear = 0; s.integrity = INTEGRITY.rest; s.labels.length = 0; s.linkAlpha = 0;
+    gridSeg.acc = 0; gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
     s.quietSince = -1e9; s.damage = 0; s.deficit = 0; s.pressOnly = false; s.resetting = false; s.released = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.ampS = 0;
     s.probeS[0] = s.probeS[1] = s.probeS[2] = 0; s.orbitNorm[0] = s.orbitNorm[1] = 0;
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;

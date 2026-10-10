@@ -112,15 +112,16 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   function resize(width, height) {
     lastW = width; lastH = height;
     const w = Math.max(1, Math.round(width * hdrScale)), h = Math.max(1, Math.round(height * hdrScale));
+    // Trail texels no finer than 4 CSS px: at native hi-DPI backing a 1/5 target spread the breach ~24 % less than v1.
+    const cssW = canvas.clientWidth || innerWidth, cssH = canvas.clientHeight || innerHeight;
+    const tw = Math.max(1, Math.round(Math.min(w / 5, cssW / 4))), th = Math.max(1, Math.round(Math.min(h / 5, cssH / 4)));
     fluid.resize(width, height);                 // returns early itself when the sim size is unchanged
-    if (!forceRealloc && hdr[0] && w === W && h === H) return;    // no realloc, no trail/HDR wipe
+    if (!forceRealloc && hdr[0] && w === W && h === H && trail?.width === tw && trail?.height === th) return;    // no realloc, no trail/HDR wipe
     forceRealloc = false;
     W = w; H = h;
     hdr.forEach((t) => t?.dispose());
     hdr = [createTarget(gl, W, H, hdrFmt), createTarget(gl, W, H, hdrFmt)];
-    // Trail texels no finer than 4 CSS px: at native hi-DPI backing a 1/5 target spread the breach ~24 % less than v1.
-    const cssW = canvas.clientWidth || innerWidth, cssH = canvas.clientHeight || innerHeight;
-    trail?.dispose(); trail = createPair(gl, Math.max(1, Math.round(Math.min(W / 5, cssW / 4))), Math.max(1, Math.round(Math.min(H / 5, cssH / 4))), hdrFmt);
+    trail?.dispose(); trail = createPair(gl, tw, th, hdrFmt);
     bloom.resize(W, H);
     stillSeeded = false;
   }
@@ -155,10 +156,10 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform1f(p.uRadius, t.pressDisc ? 0.06 : t.radius);
     gl.uniform1f(p.uAspect, W / H); gl.uniform1f(p.uDecay, Math.pow(0.985, ratio)); gl.uniform1f(p.uTime, model.time % 1000);
     gl.uniform1f(p.uGrow, 1 - Math.pow(0.65, ratio)); gl.uniform1f(p.uRatio, t.pressDisc ? 1 : ratio);   // rate-independent: 120 Hz no longer tears twice as heavy
-    const cam = model.cam, s = model.state, sealing = s.front >= 0 && s.ampS > 1e-3 && cam.ready;
+    const cam = model.cam, s = model.state, sealing = s.resetT >= 0 && s.ampS > 1e-3 && cam.ready;   // a ring fading after an abort no longer seals
     gl.uniform3f(p.uSeal, cam.shellPx.x / Math.max(1, cam.width), cam.shellPx.y / Math.max(1, cam.height), s.front * cam.shellPx.r / Math.max(1, cam.height));
     gl.uniform1f(p.uSealK, sealing ? 1 - Math.pow(1 - RESET.seal * s.ampS, ratio) : 0);
-    gl.uniform1f(p.uHead, t.pressDisc ? 0 : 1);   // a press dents the trail but has no leading edge (as the CPU grid): no one-frame flash
+    gl.uniform1f(p.uHead, t.pressDisc ? 0 : 1); gl.uniform1f(p.uKeep, Math.pow(0.9, ratio));   // a press dents the trail but has no leading edge (as the CPU grid): no one-frame flash
     blit(gl, trail.write); trail.swap();
     t.pressDisc = false;
   }
