@@ -198,7 +198,7 @@ export function createModel(shape, uniforms) {
     {
       const I = INTEGRITY, quiet = s.time - s.quietSince, span = I.rest - I.floor;
       if (quiet < I.quiet) {                                                     // under the hand: the ledger only grows
-        if (s.resetting) { s.resetting = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.onReset?.('abort', I.rest - s.deficit, 0); }
+        if (s.resetting) { s.damage = Math.min(s.damage, s.deficit / span); s.resetting = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.onReset?.('abort', I.rest - s.deficit, 0); }   // the ledger keeps what it healed
         if (quiet < I.active && s.simulate) s.damage += I.acc * meanDisc * (1 - s.damage) * dt;
         s.deficit = Math.min(span, Math.max(s.deficit, I.liveCap * (1 - Math.exp(-I.live * meanDisc / I.liveCap)), span * s.damage));
       } else if (!s.resetting && s.deficit > 0.01) {                             // a second of quiet: the reset fires
