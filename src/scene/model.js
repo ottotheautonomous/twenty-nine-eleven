@@ -98,6 +98,7 @@ export function createModel(shape, uniforms) {
     trail: { ax: 0.5, ay: 0.5, bx: 0.5, by: 0.5, radius: 0, pressDisc: false },
     forcedNode: -1, tapNodes: [], tapUntil: 0, aspect: 16 / 9,
     present: 0, crossedAt: -1e9, entered: false,
+    probeVel: [0, 0, 0], lastProbeRaw: [0, 0, 0], poke: 0, probeJump: false,
   };
   const eyeDir = [0, 0, -1], tmp3 = [0, 0, 0];
 
@@ -105,6 +106,8 @@ export function createModel(shape, uniforms) {
     const u = uniforms;
     u.u_probeX.value = s.probeS[0]; u.u_probeY.value = s.probeS[1]; u.u_probeZ.value = s.probeS[2];
     u.u_vel.value = s.vel; u.u_yaw.value = s.yaw; u.u_pitch.value = s.pitch; u.u_tear.value = s.tear; u.u_present.value = s.present;
+    u.u_probeRX.value = s.probeRaw[0]; u.u_probeRY.value = s.probeRaw[1]; u.u_probeRZ.value = s.probeRaw[2];
+    u.u_pokeX.value = s.probeVel[0]; u.u_pokeY.value = s.probeVel[1]; u.u_pokeZ.value = s.probeVel[2]; u.u_poke.value = s.poke;
   }
 
   function step(dtMs, view) {
@@ -116,10 +119,14 @@ export function createModel(shape, uniforms) {
     // 0. the trail segment: the model owns a -> b. The renderers only read it and clear pressDisc.
     if (!s.trail.pressDisc) { s.trail.ax = s.trail.bx; s.trail.ay = s.trail.by; }
     // 1. pointer filter (NDC) with the phantom-swipe guard
+    let rawSpeed = 0;
     if (s.pointerDirty) {
       const jump = Math.hypot(s.raw[0] - s.lastRaw[0], s.raw[1] - s.lastRaw[1]) > 0.6 || now - s.lastPointerAt > 150;
-      if (jump) { pf.set(s.raw[0], s.raw[1]); s.trail.ax = s.trail.bx = s.raw[0] * 0.5 + 0.5; s.trail.ay = s.trail.by = s.raw[1] * 0.5 + 0.5; }
-      else pf.target(s.raw[0], s.raw[1]);
+      if (jump) { pf.set(s.raw[0], s.raw[1]); s.trail.ax = s.trail.bx = s.raw[0] * 0.5 + 0.5; s.trail.ay = s.trail.by = s.raw[1] * 0.5 + 0.5; s.probeJump = true; }
+      else {
+        pf.target(s.raw[0], s.raw[1]);
+        rawSpeed = Math.hypot((s.raw[0] - s.lastRaw[0]) * s.aspect, s.raw[1] - s.lastRaw[1]) / Math.max(dt, 1e-3);   // NDC-height units per second
+      }
       s.lastRaw[0] = s.raw[0]; s.lastRaw[1] = s.raw[1]; s.pointerDirty = false;
     }
     if (motion) pf.step(ratio);
@@ -127,6 +134,14 @@ export function createModel(shape, uniforms) {
     // 2. world probes on the centre plane (last frame's camera is fine)
     screenToWorldOnCentrePlane(cam.inv, pf.state.sx, pf.state.sy, cam.forward, s.probeS);
     screenToWorldOnCentrePlane(cam.inv, pf.state.x, pf.state.y, cam.forward, s.probeRaw);
+    // 2b. the hand: raw probe velocity on the centre plane (R/s, clamped) and a poke that rises at once and dies in ~0.15 s.
+    //     A still hand does nothing; movement is what the lattice feels, on the frame it happens.
+    if (s.probeJump || !motion) { s.probeVel[0] = s.probeVel[1] = s.probeVel[2] = 0; s.probeJump = false; }
+    else for (let i = 0; i < 3; i++) s.probeVel[i] = (s.probeRaw[i] - s.lastProbeRaw[i]) / Math.max(dt, 1e-3);
+    for (let i = 0; i < 3; i++) s.lastProbeRaw[i] = s.probeRaw[i];
+    const pvl = Math.hypot(s.probeVel[0], s.probeVel[1], s.probeVel[2]);
+    if (pvl > 4) for (let i = 0; i < 3; i++) s.probeVel[i] *= 4 / pvl;
+    s.poke = Math.max(s.poke * friction(LAG.poke, ratio), Math.min(1, rawSpeed / 2.0)) * motion;
     // 3. orbit through two cascaded lerps; half speed while losing the visitor
     const aimed = (s.inScene || s.keyboard) && motion;
     const aim = aimed ? [pf.state.sx * ORBIT.yaw, -pf.state.sy * ORBIT.pitch] : [0, 0];
@@ -221,6 +236,7 @@ export function createModel(shape, uniforms) {
     s.vel = 0; s.yaw = 0; s.pitch = 0; s.tear = 0; s.integrity = INTEGRITY.rest; s.labels.length = 0; s.linkAlpha = 0;
     s.probeS[0] = s.probeS[1] = s.probeS[2] = 0; s.orbitNorm[0] = s.orbitNorm[1] = 0;
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;
+    s.poke = 0; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
     s.tier0.on = false; s.tier0.since = -1;
     trailGrid.clear();
     publish();

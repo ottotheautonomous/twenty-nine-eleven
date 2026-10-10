@@ -8,7 +8,7 @@ export const KEY = norm([-0.6, 0.5, -0.6]);           // direction TO the key li
 export const LATTICE = { set: 1, tube: 0.02, tilt: [18 * DEG, 12 * DEG] };   // set 1 = 10 great circles; fallback set 0 (6)
 export const TUBE_JITTER = 0.014;                 // tighter strands: a tube of light, not a chalk line
 export const NODES = 64;
-export const LAG = { pointer: 0.05, orbit: 0.05, particle: 0.06, velGain: 0.09, velFriction: 0.98, trailDecay: 0.985, trailGrow: 0.35, trailRadius: 0.05 };
+export const LAG = { poke: 0.85, pointer: 0.05, orbit: 0.05, particle: 0.10, velGain: 0.09, velFriction: 0.98, trailDecay: 0.985, trailGrow: 0.35, trailRadius: 0.05 };
 export const EXPOSURE = { gain: 1.8, velPenalty: 0.6, decay: 0.992, show: 0.35, hide: 0.315 };
 export const ORBIT = { yaw: 0.11, pitch: 0.04, shake: 0.008, idle: 0.026 };   // radians
 export const EMBER = { coreR: 0.045, haloR: 0.42, hdr: 3.0, halo: 0.25, offset: 0.08 };   // in R

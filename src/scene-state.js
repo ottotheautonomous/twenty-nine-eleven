@@ -10,6 +10,8 @@ export const uniforms = {
   // written by model.js each frame (continuous, never animated by Motion)
   u_probeX: { value: 0 }, u_probeY: { value: 0 }, u_probeZ: { value: 0 }, u_vel: { value: 0 },
   u_yaw: { value: 0 }, u_pitch: { value: 0 }, u_tear: { value: 0 }, u_present: { value: 0 },
+  u_probeRX: { value: 0 }, u_probeRY: { value: 0 }, u_probeRZ: { value: 0 },   // the hand: raw probe, its world velocity, and a poke
+  u_pokeX: { value: 0 }, u_pokeY: { value: 0 }, u_pokeZ: { value: 0 }, u_poke: { value: 0 },
   // bound values
   u_engage: { value: 0 }, u_idle: { value: 0 },
   // entrance

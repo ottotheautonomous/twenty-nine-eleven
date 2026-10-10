@@ -76,7 +76,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   const { gl, caps } = ctx;
   if (!caps.rgba16f || !caps.rg16f || caps.maxDrawBuffers < 3) return null;
 
-  const fluid = createFluid(gl, caps, { simRes: tier.fluidRes, pressureIterations: tier.jacobi, curl: 0, velocityDecay: 0.98, splatRadius: 0.10, splatGain: 1.0, maxSplatGapMs: 150 });
+  const fluid = createFluid(gl, caps, { simRes: tier.fluidRes, pressureIterations: tier.jacobi, curl: 0, velocityDecay: 0.98, splatRadius: 0.14, splatGain: 1.0, maxSplatGapMs: 150 });
   let particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: tier.state32 && caps.rgba32f, homes: shape.homes, latticeRotT: shape.rotT, shape: shape.shapeId });
   if (!particles.mrtOk && tier.state32) {
     particles.dispose();

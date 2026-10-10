@@ -5,6 +5,7 @@
 // precision); a third MRT attachment carries the cascaded proximity response,
 // the warm term and the build; the spring weakens under the trail; morphing removed.
 import { createProgram, bindTex, FULLSCREEN_VS } from './gl.js';
+import { LAG } from './constants.js';
 
 const SIM_FS = (noiseSrc, sdfSrc) => noiseSrc + sdfSrc + `
 in vec2 vUv;
@@ -14,6 +15,8 @@ uniform vec3 uCamRight, uCamUp, uLightDir;
 uniform vec3 uProbe;
 uniform float uTime, uRatio, uK06;
 uniform float uBuild, uOpen, uFlinch, uTight, uIdle, uPresent;
+uniform vec3 uProbeRaw, uPokeVel;      // raw probe on the centre plane; its world velocity (R/s, |v| <= 4)
+uniform float uPoke, uShove, uDrag;    // raw pointer speed 0..1 (0.15 s tail); impulse gains
 uniform float uFluidPush, uSwirl, uSwirlFreq, uSpring, uAttract, uFriction, uSpeedLerp, uWrap, uBound;
 layout(location = 0) out vec4 oOff;            // xyz offset from home, w = wrap-diffuse lighting
 layout(location = 1) out vec4 oVel;            // xyz, w = smoothed speed
@@ -30,7 +33,8 @@ void main() {
   float built = smoothstep(s - 0.08, s, 1.2 * uBuild);
 
   // Proximity: the lattice notices the probe, through two cascaded lerps (90 % in 1.05 s).
-  float prox = uPresent * (1.0 - smoothstep(0.35, 1.2, distance(p, uProbe))) * (0.5 + 0.3 * sin(uTime + r * 12.34) * r);
+  // Proximity measures from the raw probe; the softness lives in the cascade alone (90 % in 0.6 s).
+  float prox = uPresent * (1.0 - smoothstep(0.35, 1.2, distance(p, uProbeRaw))) * (0.5 + 0.3 * sin(uTime + r * 12.34) * r);
   float idle = uIdle * 0.2 * (0.5 + 0.5 * sin(-2.0 * uTime + home.x)) * (0.5 + 0.5 * cos(-uTime)) * mix(0.5, 2.0, r);
   float target = max(idle, prox);
   float d1 = mix(A.x, target, uK06), d2 = mix(A.y, d1, uK06);
@@ -45,6 +49,12 @@ void main() {
   float trail = on ? texture(uTrail, suv).r : 0.0;
   float fl = length(f);
 
+  // 0 the hand: an instant, velocity-weighted shove from the raw probe. A still hand does nothing.
+  vec3 dp = p - uProbeRaw; float dd = max(length(dp), 1e-3);
+  float hk = 1.0 - smoothstep(0.0, 0.55, dd); hk *= hk;
+  float hand = uPoke * hk;
+  v += (dp / dd) * hand * uShove * uRatio;                                                       // radial, away from the hand
+  v += uPokeVel * hand * uDrag * uRatio;                                                         // along the hand's motion
   v += (uCamRight * f.x + uCamUp * f.y) * uFluidPush * uRatio;                                   // 1 fluid push (the tear)
   vec3 n = BitangentNoise4D(vec4(p * uSwirlFreq, uTime * (1.0 + 0.7 * r)));
   v += n * uSwirl * (1.0 - 0.5 * uTight) * (0.7 + 0.3 * r) * uRatio;                            // 2 swirl
@@ -77,6 +87,7 @@ uniform vec3 uRing;          // (longitude, phase 0..1, amplitude)
 uniform vec4 uTap;           // (x, y, z, t); t outside (0,1) = none
 uniform float uSentry;       // idle sentry band phase 0..1; 0 = none
 uniform vec3 uKey;           // key light direction (sentry band origin)
+uniform vec3 uProbeRaw; uniform float uPoke;   // the hand: instant light where it moves
 out float vLight, vSpeed, vFade, vD2, vWarm, vBuilt, vBoost, vGrow;
 void main() {
   int w = textureSize(uHome, 0).x;
@@ -101,7 +112,9 @@ void main() {
   float size = uSizeK / max(-vp.z, 1e-3) * grow * mix(0.7, 1.4, g);
   gl_PointSize = clamp(size, 1.0, uMaxPoint);
   vFade = clamp(size * size, 0.0, 1.0) * flick;
-  vBoost = (1.0 + 1.5 * (ring + tap) + sentry) * mix(0.6, 1.5, g);
+  float hk = 1.0 - smoothstep(0.0, 0.6, distance(p, uProbeRaw)); hk *= hk;
+  float touch = uPoke * hk;                                            // capped at +1: the tube stays under the bloom threshold
+  vBoost = (1.0 + 1.5 * (ring + tap) + sentry + touch) * mix(0.6, 1.5, g);
   vGrow = grow;
   vLight = O.w; vSpeed = V.w; vD2 = A.y; vWarm = A.z; vBuilt = A.w;
 }`;
@@ -126,7 +139,7 @@ void main() {
   vec2 tr = texture(uTrail, gl_FragCoord.xy * uInvRes).rg;
   col += uColFast * (tr.g * 2.5 + tr.r * 0.3);                        // the breach rim brightens the lattice; it does not scratch the ember
   col += uColFast * vD2 * vD2 * 0.8;
-  float a = (1.0 - 0.6 * smoothstep(uBlurRange.x, uBlurRange.y, vSpeed)) * vFade * vBuilt;
+  float a = (1.0 - 0.35 * smoothstep(uBlurRange.x, uBlurRange.y, vSpeed)) * vFade * vBuilt;   // moved particles stay visible
   a *= 1.0 - smoothstep(0.75, 1.0, r2);
   float energy = pow(1.0 / vGrow, 1.5);
   o = vec4(col * a * uIntensity * vBoost * energy * (1.0 + 0.1 * uEngage), a);   // the modal dim is applied once, in the composite
@@ -140,7 +153,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     render: createProgram(gl, caps, RENDER_VS, RENDER_FS),
   };
   const cfg = {
-    fluidPush: 5e-4, swirl: 0.7e-4, swirlFreq: 7.0, spring: 1e-3, attract: 9e-4, friction: 0.9, speedLerp: 0.035, wrap: 0.18, bound: 2.5,
+    fluidPush: 7e-4, shove: 1.2e-3, drag: 3e-4, swirl: 0.7e-4, swirlFreq: 7.0, spring: 1e-3, attract: 9e-4, friction: 0.9, speedLerp: 0.035, wrap: 0.18, bound: 2.5,
     sizePx: 1.6, intensity: 0.020, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],
   };
   function tex(internal, type, data = null) {
@@ -194,9 +207,11 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniformMatrix4fv(s.uViewProj, false, cam.viewProj); gl.uniformMatrix4fv(s.uView, false, cam.view);
     gl.uniform3fv(s.uCamRight, cam.right); gl.uniform3fv(s.uCamUp, cam.up); gl.uniform3fv(s.uLightDir, cam.lightDir);
     gl.uniform3f(s.uProbe, u.u_probeX.value, u.u_probeY.value, u.u_probeZ.value);
-    gl.uniform1f(s.uTime, time % 1000); gl.uniform1f(s.uRatio, ratio); gl.uniform1f(s.uK06, 1 - Math.pow(1 - 0.06, ratio));
+    gl.uniform1f(s.uTime, time % 1000); gl.uniform1f(s.uRatio, ratio); gl.uniform1f(s.uK06, 1 - Math.pow(1 - LAG.particle, ratio));
     gl.uniform1f(s.uBuild, u.u_build.value); gl.uniform1f(s.uOpen, u.u_open.value); gl.uniform1f(s.uFlinch, u.u_flinch.value);
     gl.uniform1f(s.uTight, u.u_tight.value); gl.uniform1f(s.uIdle, u.u_idle.value); gl.uniform1f(s.uPresent, u.u_present.value);
+    gl.uniform3f(s.uProbeRaw, u.u_probeRX.value, u.u_probeRY.value, u.u_probeRZ.value); gl.uniform3f(s.uPokeVel, u.u_pokeX.value, u.u_pokeY.value, u.u_pokeZ.value);
+    gl.uniform1f(s.uPoke, u.u_poke.value); gl.uniform1f(s.uShove, cfg.shove); gl.uniform1f(s.uDrag, cfg.drag);
     gl.uniform1f(s.uFluidPush, cfg.fluidPush); gl.uniform1f(s.uSwirl, cfg.swirl); gl.uniform1f(s.uSwirlFreq, cfg.swirlFreq);
     gl.uniform1f(s.uSpring, cfg.spring); gl.uniform1f(s.uAttract, cfg.attract);
     gl.uniform1f(s.uFriction, Math.pow(cfg.friction, ratio)); gl.uniform1f(s.uSpeedLerp, 1 - Math.pow(1 - cfg.speedLerp, ratio));
@@ -220,6 +235,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3f(r.uRing, u.u_ringLon.value, u.u_ringPhase.value, u.u_ringAmp.value);
     gl.uniform4f(r.uTap, u.u_tapX.value, u.u_tapY.value, u.u_tapZ.value, u.u_tapT.value);
     gl.uniform1f(r.uSentry, u.u_sentry.value); gl.uniform3fv(r.uKey, cam.lightDir);
+    gl.uniform3f(r.uProbeRaw, u.u_probeRX.value, u.u_probeRY.value, u.u_probeRZ.value); gl.uniform1f(r.uPoke, u.u_poke.value);
     gl.uniform3fv(r.uColDark, opts.colDark); gl.uniform3fv(r.uColLight, opts.colLight); gl.uniform3fv(r.uColFast, opts.colFast); gl.uniform3fv(r.uEmberCol, opts.ember);
     gl.uniform3fv(r.uLightView, cam.lightView);
     gl.uniform1f(r.uIntensity, opts.intensity); gl.uniform1f(r.uWrapR, cfg.wrap); gl.uniform1f(r.uEmberLevel, opts.emberLevel);
