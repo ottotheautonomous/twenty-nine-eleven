@@ -247,5 +247,10 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   }
 
   // The governor lowers the active sprite count without reallocating, so particles keep their state.
-  return { type: 'canvas2d', software: false, lost: () => false, ready: () => true, resize() {}, draw, destroy() {}, setSprites(n) { N = Math.max(250, Math.min(maxN, Math.round(n))); }, get sprites() { return N; } };
+  return { type: 'canvas2d', software: false, lost: () => false, ready: () => true, resize() {}, draw, destroy() {}, setSprites(n) {
+    const next = Math.max(250, Math.min(maxN, Math.round(n)));
+    // Sprites coming back start at rest on the lattice; their stored state is stale from when they were last drawn.
+    for (const a of [ox, oy, oz, vx, vy, vz, d1, d2]) a.fill(0, N, Math.max(N, next));
+    N = next;
+  }, get sprites() { return N; } };
 }
