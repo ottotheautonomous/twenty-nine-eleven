@@ -164,7 +164,7 @@ function applyMotionPolicy() {
   if (still()) {
     labels.hideAll(); stopSentry();
     labels.cancelRoll();
-    if (restoring) { restoring = false; labels.setState(model.state.state); }   // still: the ledger is cleared, so is the word
+    if (restoring) { restoring = false; if (current?.name !== 'verse') labels.setState(model.state.state); }   // still: the ledger is cleared, so is the word (the verse keeps PURPOSE)
     const t0 = model.state.tier0; if (t0.on) { t0.on = false; t0.since = -1; }
     animate(uniforms, current?.name === 'verse' ? { u_tier0: 0, u_classAmp: 0 } : { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();   // the open verse owns warm/tight
     model.rowHover(-1); rowIntent = 0;
@@ -473,7 +473,14 @@ const dialogs = {
     closeScenery: () => animate(uniforms, { u_open: 0, u_dolly: 0, u_dim: 0 }, { duration: .6, ease }),
     stillOpen: { u_dolly: 1, u_dim: 1, u_open: 1 }, stillClosed: { u_dolly: 0, u_dim: 0, u_open: 0 },
     onOpen() {}, reveal: null, settle: null, conceal: null,
-    afterClose() { if (!still()) { integrityLive = false; labels.blinkIntegrity(.9, .998).then(() => { integrityLive = true; }); } },
+    afterClose() {
+      if (still()) return;
+      const s = model.state;
+      if (s.deficit > 0) {                                   // the ledger is open: no "all clear" blink; the word and the reading catch up
+        if (!restoring && s.resetting && s.resetAmp > 0) { restoring = true; labels.setState('RESTORING'); }
+        labels.rollIntegrity(s.integrity);
+      } else { integrityLive = false; labels.blinkIntegrity(.9, .998).then(() => { integrityLive = true; }); }
+    },
   },
   verse: {
     name: 'verse', dialog: verseDialog, surface: verseSurface, closeButton: $('#close-verse'), origin: verseButton, initial: verseBody,
@@ -490,7 +497,12 @@ const dialogs = {
     onOpen() { if (!still()) { this.purpose = true; labels.setState('PURPOSE'); boost('u_boostGreet', .3, .9); } },   // the ember exhales as the panel leaves it
     reveal: revealVerse, settle: settleVerse, conceal: concealVerse,
     afterClose() {
-      if (this.purpose) { this.purpose = false; labels.setState(model.state.state); }
+      if (this.purpose) {                                    // a reset that ran behind the verse keeps its word
+        this.purpose = false;
+        const s = model.state;
+        restoring = restoring || (!still() && s.resetting && s.resetAmp > 0);
+        labels.setState(restoring ? 'RESTORING' : s.state);
+      }
       if (!still() && entered && verseActive) animate(uniforms, { u_warm: .4 }, { duration: .5, ease });   // focus is back on the verse: its light holds
     },
   },
