@@ -1,7 +1,7 @@
 // The ember: drawn last into the HDR target, scissored to its box. Its coverage is THIS frame's alpha of the particles NEARER than it
 // (the ember's box of the scene, copied into uPrevHdr before this pass), opened by the trail (a tear lets the warmth out). A front strut
 // dims the core and the back half of the halo; the halo's front half is the glow in the air between the camera and the strut and is
-// never cut. Particles behind the ember never touch it.
+// never cut (floors: core 19 %, halo 57 % under a saturated front strut). Particles behind the ember never touch it.
 in vec2 vUv;
 uniform sampler2D uPrevHdr, uTrail;
 uniform vec2 uEmberPx;        // ember centre, HDR px (y up)

@@ -36,6 +36,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   let sprites = [], spriteScale = 0, hazeImg = null, hazeR = 0;
   const small = document.createElement('canvas'), sctx = small.getContext('2d');
   const layer = document.createElement('canvas'), lctx = layer.getContext('2d');      // emissive layer on black: bloom adds only light
+  const vmask = document.createElement('canvas'), vctx = vmask.getContext('2d');     // the ember's veil: front sprites union, erased once (a floor, like GL)
   const linkBuf = new Float32Array(model.plexus.maxVertices * 4);
   const tmp = [0, 0, 0];
 
@@ -203,7 +204,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const vxp = view4[0] * px + view4[4] * py + view4[8] * pz + view4[12] - EV[0], vyp = view4[1] * px + view4[5] * py + view4[9] * pz + view4[13] - EV[1];
       const vzp = view4[2] * px + view4[6] * py + view4[10] * pz + view4[14] - EV[2], rho2 = vxp * vxp + vyp * vyp, nearer = vzp > 0;
       const eL = eGain * Math.exp(-rho2 / eReach2) / (1 + (rho2 + vzp * vzp) / eFall2) * (nearer ? 0.25 : 1);
-      if (tn < 3 && eL > 0.06) tn = 4;
+      if (tn < 3 && (eL > 0.10 || (tone[i] === 4 && eL > 0.08))) tn = 4;   // hysteresis: the idle breath and drift never flicker the tone
       inten[i] *= 1 + 1.2 * eL;
       veil[i] = nearer && rho2 < 0.25 ? 1 : 0;   // in front and within 0.5 R of the ember in the view plane
       tone[i] = tn;
@@ -226,9 +227,13 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       g.addColorStop(0.3, `rgba(240,166,94,${0.08 * a * (1 - air)})`);
       g.addColorStop(1, 'rgba(240,166,94,0)');
       ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(ex - er * 1.6, ey - er * 1.6, er * 3.2, er * 3.2);
-      ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = EMBER_LIGHT.veil;   // soft, never a black cut
-      for (let i = 0; i < N; i++) { if (!veil[i] || sz[i] <= 0 || inten[i] < 0.02) continue; const sp = sprites[sizeIdx[i]][0], half = sp.width / 2; ctx.drawImage(sp, sx[i] - half, sy[i] - half); }
-      ctx.globalAlpha = 1;
+      // the veil: the union of the front sprites (source-over into a mask the size of the ember box), erased once at EMBER_LIGHT.veil,
+      // so overlapping sprites can never cut deeper than one (GL's floor), never a black hole
+      const bx = Math.floor(ex - er * 1.6), by = Math.floor(ey - er * 1.6), bs = Math.ceil(er * 3.2) + 2;
+      if (vmask.width !== bs || vmask.height !== bs) { vmask.width = bs; vmask.height = bs; } else vctx.clearRect(0, 0, bs, bs);
+      vctx.globalCompositeOperation = 'source-over';
+      for (let i = 0; i < N; i++) { if (!veil[i] || sz[i] <= 0 || inten[i] < 0.02) continue; const sp = sprites[sizeIdx[i]][0], half = sp.width / 2; vctx.drawImage(sp, sx[i] - half - bx, sy[i] - half - by); }
+      ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = EMBER_LIGHT.veil; ctx.drawImage(vmask, bx, by); ctx.globalAlpha = 1;
       g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
       g.addColorStop(0, 'rgba(240,166,94,0)');
       g.addColorStop(0.04, 'rgba(240,166,94,0)');
