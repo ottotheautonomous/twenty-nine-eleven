@@ -13,8 +13,9 @@ function load() {
     if (window.turnstile) { resolve(window.turnstile); return; }
     const script = document.createElement('script');
     script.src = SCRIPT; script.async = true; script.defer = true;
-    script.addEventListener('load', () => (window.turnstile ? resolve(window.turnstile) : reject(new Error('turnstile'))), { once: true });
-    script.addEventListener('error', () => { loading = null; reject(new Error('turnstile')); }, { once: true });
+    const fail = () => { loading = null; script.remove(); reject(new Error('turnstile')); };   // the next send fetches it afresh
+    script.addEventListener('load', () => (window.turnstile ? resolve(window.turnstile) : fail()), { once: true });
+    script.addEventListener('error', fail, { once: true });
     document.head.append(script);
   });
   return loading;
@@ -25,7 +26,7 @@ function settle(fn, value) { const p = pending; pending = null; p?.[fn](value); 
 function render(ts) {
   if (widget !== null) return;
   widget = ts.render(container, {
-    sitekey: SITE_KEY, action: 'contact', execution: 'execute', appearance: 'interaction-only', theme: 'dark', size: 'flexible',
+    sitekey: SITE_KEY, action: 'contact', execution: 'execute', appearance: 'interaction-only', theme: 'dark', size: container.parentElement.clientWidth >= 300 ? 'flexible' : 'compact',   // flexible needs 300px; a 320px phone gets compact
     callback: (token) => settle('resolve', token),
     'error-callback': () => { settle('reject', new Error('turnstile')); return true; },
     'expired-callback': () => ts.reset(widget),
@@ -44,7 +45,7 @@ export async function turnstileToken() {
   if (!SITE_KEY) return '';
   const failure = new Error('We could not verify this browser. Please try again. Your message is still here.');
   let ts;
-  try { ts = await load(); } catch { throw failure; }
+  try { ts = await Promise.race([load(), new Promise((_, reject) => setTimeout(reject, 10000))]); } catch { throw failure; }   // a hung script cannot hold the form on Sending…
   if (!container) throw failure;
   render(ts);
   settle('reject', failure);

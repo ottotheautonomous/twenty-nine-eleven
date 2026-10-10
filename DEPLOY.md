@@ -37,15 +37,17 @@ For later deployment from GitHub, store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_A
 The form is built for [Turnstile](https://developers.cloudflare.com/turnstile/), Cloudflare's invisible bot check. It stays off until both keys exist; with them, Cloudflare's script loads only when the contact panel opens, and the Worker refuses any enquiry without a valid, single-use token.
 
 1. In Cloudflare, open **Turnstile → Add widget**. Name it `twenty nine eleven contact`, add the hostnames that serve the page (e.g. `ottotheautonomous.github.io`, and later `twentynineeleven.net`), and choose **Invisible** (or Managed). Copy the **site key** and the **secret key**.
-2. Give the Worker the secret (never commit it): `npx wrangler secret put TURNSTILE_SECRET`. Optionally restrict accepted hostnames with a `TURNSTILE_HOSTNAMES` variable in `wrangler.jsonc` (comma-separated, matching the widget's hostnames).
+2. Give the Worker the secret (never commit it): `npx wrangler secret put TURNSTILE_SECRET`. `wrangler.jsonc` already lists the accepted page hostnames in `TURNSTILE_HOSTNAMES`; keep it matching the widget's hostnames (it is checked only once the secret exists).
 3. Give the page the site key (public): in the GitHub repository, **Settings → Secrets and variables → Actions → Variables**, add `TURNSTILE_SITE_KEY`. The Pages build passes it as `VITE_TURNSTILE_SITE_KEY`, and the page's Content-Security-Policy then allows `challenges.cloudflare.com` for its script and frame only.
 4. Redeploy the Worker and republish the page, then send a test enquiry (step 4).
 
 Without the secret the Worker accepts enquiries without a token (rate limits, the honeypot and validation still apply). Set the secret only after the page with the site key is live, or real visitors will be refused. For more protection without Turnstile, add a Cloudflare rate-limiting rule on `contact.twentynineeleven.net/api/contact` and turn on Bot Fight Mode for the zone.
 
+The `GLOBAL_LIMITER` cap (20 enquiries a minute) counts per Cloudflare location, not worldwide, and only spends on enquiries that passed validation and, once the secret is set, the bot check. Without Turnstile, a script sending valid-looking enquiries can still use it up for visitors near the same location; the rate-limiting rule above is the platform-level answer, and it also protects the Workers free plan's daily request allowance.
+
 ## 4. Verify the real form
 
-Open the live page and send an enquiry you authorize for the contact inbox. Confirm the on-page thank-you state **and** the actual inbox receipt; Reply should address the email supplied in the form. If sending fails, your message stays in the form. Until this check succeeds, email delivery remains unverified.
+Open the live page and send an enquiry you authorize for the contact inbox. Confirm the on-page thank-you state **and** the actual inbox receipt; Reply should address the email supplied in the form. Use a name with a comma, such as `Smith, John`, to confirm the Reply-To display name arrives intact. If sending fails, your message stays in the form. Until this check succeeds, email delivery remains unverified.
 
 ## Use the company domain later
 

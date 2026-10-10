@@ -253,6 +253,9 @@ test('IPv6 visitors share one rate-limit bucket per /64; IPv4 keys are unchanged
   assert.equal(ipKey('2001:db8::1'), ipKey('2001:db8:0:0:ffff::9'));
   assert.notEqual(ipKey('2001:db8::1'), ipKey('2001:db8:1::1'));
   assert.equal(ipKey(null), 'contact:unknown');
+  assert.equal(ipKey('::ffff:192.0.2.10'), 'contact:192.0.2.10');
+  assert.notEqual(ipKey('::ffff:192.0.2.10'), ipKey('::ffff:198.51.100.7'));
+  assert.equal(ipKey('64:ff9b::198.51.100.7'), 'contact:198.51.100.7');
 });
 
 test('a global cap refuses delivery when every visitor together exceeds it', async () => {
@@ -260,6 +263,20 @@ test('a global cap refuses delivery when every visitor together exceeds it', asy
   const result = await worker.fetch(request(), env);
   assert.equal(result.status, 503);
   assert.equal(sent.length, 0);
+});
+
+test('junk and unverified requests do not spend the global cap, so they cannot lock real visitors out', async () => {
+  let spent = 0;
+  const GLOBAL_LIMITER = { limit: async () => ({ success: ++spent <= 1 }) };
+  for (const body of [{}, { ...valid, email: 'nope' }, { ...valid, hp_ref: 'x' }]) {
+    const { env } = environment({ GLOBAL_LIMITER });
+    assert.equal((await worker.fetch(request(body), env)).status, 400);
+  }
+  { const { env } = environment({ GLOBAL_LIMITER, TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request(), env)).status, 403); }
+  assert.equal(spent, 0);
+  const { env, sent } = environment({ GLOBAL_LIMITER });
+  assert.equal((await worker.fetch(request(), env)).status, 200);
+  assert.equal(sent.length, 1);
 });
 
 test('names that could pose as an address or forge a line, and non-plain emails, are rejected', async () => {
@@ -275,10 +292,19 @@ test('names that could pose as an address or forge a line, and non-plain emails,
     assert.equal((await worker.fetch(request({ ...valid, email }), env)).status, 400, email);
     assert.equal(sent.length, 0);
   }
-  for (const name of ["Siobhán O'Brien-Ng", 'Zoë', 'José Martínez', '张伟']) {
+  for (const name of ["Siobhán O'Brien-Ng", 'Zoë', 'José Martínez', '张伟', 'علی\u200cرضا', 'ශ්\u200dරී', 'Sam 👨\u200d👩\u200d👧']) {
     const { env, sent } = environment();
     assert.equal((await worker.fetch(request({ ...valid, name }), env)).status, 200, name);
     assert.equal(sent.length, 1);
+  }
+  for (const email of ['ivan@xn--e1afmkfd.xn--p1ai', 'li@example.xn--fiqs8s', 'a+tag@mail.example.co.uk']) {
+    const { env, sent } = environment();
+    assert.equal((await worker.fetch(request({ ...valid, email }), env)).status, 200, email);
+    assert.equal(sent.length, 1);
+  }
+  for (const name of ['Jane\u202eevil', 'Jane\u200eX', 'Jane\ufeffX', 'Jane\u2028X']) {
+    const { env } = environment();
+    assert.equal((await worker.fetch(request({ ...valid, name }), env)).status, 400, JSON.stringify(name));
   }
 });
 
@@ -313,13 +339,16 @@ test('Turnstile: enforced only when the secret is configured; verified server-si
     // secret, wrong action
     stub({ success: true, action: 'login', hostname: 'ottotheautonomous.github.io' });
     { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 403); assert.equal(sent.length, 0); }
+    // secret, Cloudflare reports no action: refused (the action must be exactly "contact")
+    stub({ success: true, hostname: 'ottotheautonomous.github.io' });
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 403); assert.equal(sent.length, 0); }
     // secret, hostname not allowed
     stub({ success: true, action: 'contact', hostname: 'evil.example' });
     { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret', TURNSTILE_HOSTNAMES: 'ottotheautonomous.github.io' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 403); assert.equal(sent.length, 0); }
-    // secret, valid token: delivered; secret and token sent to siteverify, idempotency key = requestId
+    // secret, valid token: delivered; secret and token sent to siteverify, no browser-chosen idempotency key (it would let a solved token be replayed)
     calls.length = 0; stub({ success: true, action: 'contact', hostname: 'ottotheautonomous.github.io' });
     { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret', TURNSTILE_HOSTNAMES: 'ottotheautonomous.github.io' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 200); assert.equal(sent.length, 1);
-      assert.match(calls[0].url, /challenges\.cloudflare\.com\/turnstile\/v0\/siteverify$/); assert.equal(calls[0].body.secret, 'secret'); assert.equal(calls[0].body.response, 'tok'); assert.equal(calls[0].body.idempotency_key, valid.requestId); }
+      assert.match(calls[0].url, /challenges\.cloudflare\.com\/turnstile\/v0\/siteverify$/); assert.equal(calls[0].body.secret, 'secret'); assert.equal(calls[0].body.response, 'tok'); assert.equal(calls[0].body.idempotency_key, undefined); }
     // Cloudflare unreachable: 503, nothing sent
     stub(new TypeError('network'));
     { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 503); assert.equal(sent.length, 0); }

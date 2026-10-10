@@ -10,7 +10,8 @@
     { "pattern": "contact.twentynineeleven.net", "custom_domain": true }
   ],
   "vars": {
-    "ALLOWED_ORIGINS": "https://ottotheautonomous.github.io,https://michaeljameshofer.github.io,https://twentynineeleven.net,https://www.twentynineeleven.net"
+    "ALLOWED_ORIGINS": "https://ottotheautonomous.github.io,https://michaeljameshofer.github.io,https://twentynineeleven.net,https://www.twentynineeleven.net",
+    "TURNSTILE_HOSTNAMES": "ottotheautonomous.github.io,michaeljameshofer.github.io,twentynineeleven.net,www.twentynineeleven.net"
   },
   "send_email": [
     {

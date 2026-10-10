@@ -11,16 +11,19 @@ const DEFAULT_ORIGINS = [
   'https://www.twentynineeleven.net',
 ];
 
-// Names reach the email's Reply-To display name: no controls (C0/C1 incl. NEL), no format/bidi/zero-width characters,
+// Names reach the email's Reply-To display name: no controls (C0/C1 incl. NEL), no format/bidi/zero-width characters (except the
+// joiners U+200C/U+200D that Persian, Indic and emoji names need),
 // no line/paragraph separators and no address specials, so a name can neither look like an address nor forge a line.
-const BAD_NAME = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u;
+const BAD_NAME = /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u;
 // A plain addr-spec only (no quoted local parts, comments, commas or multiple addresses).
-const EMAIL = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+const EMAIL = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$/;
 
 // One rate-limit bucket per IPv4 address and per IPv6 /64 (a single host can rotate through its whole /64).
 export function ipKey(ip) {
   if (!ip) return 'contact:unknown';
   if (!ip.includes(':')) return `contact:${ip}`;
+  const mapped = ip.match(/(?:^|:)(\d+\.\d+\.\d+\.\d+)$/);   // ::ffff:1.2.3.4 and 64:ff9b::1.2.3.4 are one IPv4 host each
+  if (mapped) return `contact:${mapped[1]}`;
   const [h, t = ''] = ip.toLowerCase().split('::');
   const head = h.split(':').filter(Boolean), tail = t.split(':').filter(Boolean);
   const full = [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail];
@@ -110,16 +113,17 @@ function validate(payload) {
 
 // Cloudflare Turnstile, enforced whenever TURNSTILE_SECRET is configured (wrangler secret put TURNSTILE_SECRET). The token is
 // single-use and verified server-side; the action must be "contact" and, if TURNSTILE_HOSTNAMES is set, the hostname must match.
-async function verifyTurnstile(env, token, ip, requestId) {
+// No idempotency_key: the Worker never retries, and a key the browser chose would let one solved token be replayed.
+async function verifyTurnstile(env, token, ip) {
   if (!token) return false;
   const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ secret: env.TURNSTILE_SECRET, response: token, remoteip: ip || undefined, idempotency_key: requestId }),
+    body: JSON.stringify({ secret: env.TURNSTILE_SECRET, response: token, remoteip: ip || undefined }),
     signal: AbortSignal.timeout(8000),
   }).then((r) => r.json());
   if (result?.success !== true) return false;
-  if (result.action && result.action !== 'contact') return false;
+  if (result.action !== 'contact') return false;
   const hosts = (env.TURNSTILE_HOSTNAMES || '').split(',').map((h) => h.trim()).filter(Boolean);
   return !hosts.length || hosts.includes(result.hostname);
 }
@@ -173,13 +177,6 @@ export default {
           'Retry-After': '60',
         });
       }
-      // A global cap across every visitor: a botnet cannot flood the inbox or exhaust the sending quota.
-      if (env.GLOBAL_LIMITER) {
-        const all = await env.GLOBAL_LIMITER.limit({ key: 'contact:all' });
-        if (all?.success !== true) {
-          return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin, { 'Retry-After': '60' });
-        }
-      }
     } catch {
       return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin);
     }
@@ -198,12 +195,22 @@ export default {
     if (env.TURNSTILE_SECRET) {
       let human = false;
       try {
-        human = await verifyTurnstile(env, payload.turnstile, request.headers.get('cf-connecting-ip'), payload.requestId);
+        human = await verifyTurnstile(env, payload.turnstile, request.headers.get('cf-connecting-ip'));
       } catch {
         return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin);
       }
       if (!human) {
         return response(403, { error: 'We could not verify this browser. Please try again. Your message is still here.' }, origin);
+      }
+    }
+
+    // A shared cap for each Cloudflare location (the binding counts per location), spent only by enquiries that passed
+    // validation and the bot check, so junk requests cannot use it up and lock real visitors out.
+    if (env.GLOBAL_LIMITER) {
+      let all;
+      try { all = await env.GLOBAL_LIMITER.limit({ key: 'contact:all' }); } catch { all = null; }
+      if (all?.success !== true) {
+        return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin, { 'Retry-After': '60' });
       }
     }
 

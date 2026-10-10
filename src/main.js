@@ -576,6 +576,8 @@ function wireDialog(d) {
     const first = controls[0]; const last = controls.at(-1);
     if (!first) return;
     const stray = document.activeElement === d.initial;   // the verse body holds focus for reading; Tab goes to the controls
+    const widget = d.dialog.querySelector('.turnstile');   // a visible bot check lives in a frame the list cannot see: Tab may enter it
+    if (!event.shiftKey && widget?.offsetHeight && (widget.compareDocumentPosition(document.activeElement) & Node.DOCUMENT_POSITION_PRECEDING)) return;
     if (event.shiftKey && (document.activeElement === first || !d.dialog.contains(document.activeElement) || stray)) {
       event.preventDefault(); last.focus();
     } else if (!event.shiftKey && (document.activeElement === last || !d.dialog.contains(document.activeElement) || stray)) {
@@ -618,8 +620,8 @@ const fields = ['name', 'email', 'message'].map(name => form.elements.namedItem(
 function validate(field) {
   const value = field.value.trim(); let message = '';
   if (!value) message = field.name === 'message' ? 'Please tell us a little about your enquiry.' : `Please enter your ${field.name === 'email' ? 'email address' : 'name'}.`;
-  else if (field.name === 'name' && /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u.test(value)) message = 'Please remove quotes, angle brackets or hidden characters from your name.';
-  else if (field.name === 'email' && (field.validity.typeMismatch || !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(value))) message = 'Please enter a valid email address.';
+  else if (field.name === 'name' && /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u.test(value)) message = 'Please remove quotes, angle brackets or hidden characters from your name.';
+  else if (field.name === 'email' && (field.validity.typeMismatch || !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$/.test(value))) message = 'Please enter a valid email address.';
   else if (field.name === 'message' && value.length < 10) message = 'A little more detail, please — at least 10 characters.';
   $(`#${field.name}-error`).textContent = message; field.setAttribute('aria-invalid', String(Boolean(message))); return !message;
 }

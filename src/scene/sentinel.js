@@ -29,7 +29,9 @@ function pickTier(probe, override, force) {
 }
 
 export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout = false, readouts = null, instrument = null } = {}) {
-  const params = new URLSearchParams(location.search);
+  // Test parameters (gl, tier, shape, fx, quality) exist only in development and test builds, like ?debug; ?still only lightens the page.
+  const query = new URLSearchParams(location.search);
+  const params = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1' ? query : new URLSearchParams(query.has('still') ? 'still' : '');
   const force = params.get('gl') === 'force';
   const probe = params.get('tier') === 'c2d' ? { ok: false } : probeGPU();
   let tier = pickTier(probe, params.get('tier'), force);

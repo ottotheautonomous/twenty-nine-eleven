@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 
 // Security headers GitHub Pages cannot send, as meta tags in the BUILT page only (the dev server injects inline styles a CSP would
 // block). The inline script's hash is computed from the page itself, and the contact endpoint's origin comes from the same setting
 // the form uses, so neither can drift. frame-ancestors cannot be set from a meta tag: src/main.js refuses to run framed.
-function securityHeaders(mode) {
-  const env = loadEnv(mode, process.cwd(), 'VITE_');
-  const contact = new URL(env.VITE_CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact').origin;
-  const turnstile = env.VITE_TURNSTILE_SITE_KEY ? ' https://challenges.cloudflare.com' : '';   // Cloudflare's bot check: its script and frame, only when configured
+function securityHeaders() {
+  let contact = '', turnstile = '';
   return {
     name: 'security-headers',
     apply: 'build',
+    configResolved({ env }) {   // the same resolved settings the bundle is built with
+      contact = new URL(env.VITE_CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact').origin;
+      turnstile = env.VITE_TURNSTILE_SITE_KEY ? ' https://challenges.cloudflare.com' : '';   // Cloudflare's bot check: its script and frame, only when configured
+    },
     transformIndexHtml(html) {
       const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
         .map(([, body]) => `'sha256-${createHash('sha256').update(body).digest('base64')}'`);
@@ -33,8 +35,8 @@ function securityHeaders(mode) {
   };
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   base: './',
   build: { target: 'es2022' },
-  plugins: [securityHeaders(mode)],
-}));
+  plugins: [securityHeaders()],
+});
