@@ -109,13 +109,17 @@ export function createLabels(root, instrument, shape) {
     const text = v.toFixed(3);
     if (valueEl.textContent !== text) valueEl.textContent = text;
   }
-  // The release: the digits after the point roll in place to the new value (odometer); "0." never scrambles, nothing fades.
+  // The release: the reading counts up in place from the held value to the released one (a numeric odometer, monotone,
+  // eased): verify, then report. It never passes through 0.000 or 0.999, and it lands exactly on the model's value.
+  let rollAnim = null;
   function rollIntegrity(v) {
     if (!valueEl) return;
-    rolling = true;
-    decodeText(valueEl, v.toFixed(3), { duration: 0.3, alpha: false, glyphs: '0123456789', steps: 7, fraction: 1, lock: (ch, i) => i < 2 })
-      .then(() => { rolling = false; });
+    const from = parseFloat(valueEl.textContent) || v;
+    rollAnim?.stop(); rolling = true;
+    const anim = rollAnim = animate(from, v, { duration: 0.3, ease: [0.22, 1, 0.36, 1], onUpdate: (x) => { valueEl.textContent = x.toFixed(3); } });
+    anim.then(() => { if (rollAnim !== anim) return; valueEl.textContent = v.toFixed(3); rolling = false; rollAnim = null; });
   }
+  function cancelRoll() { rollAnim?.stop(); rollAnim = null; rolling = false; }   // a stopped Motion animation never resolves: release the guard here
   function setState(word) { stateWord = word; if (stateEl) decodeText(stateEl, word, { duration: 0.4, alphaDuration: 0.2, fraction: 0.6 }); }
   function setFindings(node) {
     findingNode = node;
@@ -140,5 +144,5 @@ export function createLabels(root, instrument, shape) {
   function blinkIntegrity(from = 0.9, to = 0.998) {
     return animate(0, 5, { duration: 0.5, ease: 'linear', onUpdate: (v) => setIntegrity(from + (to - from) * Math.floor(v) / 5, true), onComplete: () => setIntegrity(to, true) });
   }
-  return { position, setIntegrity, rollIntegrity, setState, setFindings, showTier0, hideAll, decodeInstrument, countIn, blinkIntegrity };
+  return { position, setIntegrity, rollIntegrity, cancelRoll, setState, setFindings, showTier0, hideAll, decodeInstrument, countIn, blinkIntegrity };
 }
