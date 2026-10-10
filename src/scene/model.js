@@ -192,7 +192,7 @@ export function createModel(shape, uniforms) {
       for (const l of s.labels) { const t = Array.isArray(l.text) ? l.text[0] : l.text; if (seen.has(t)) continue; seen.add(t); s.labels[n++] = l; if (n === 3) break; }
       s.labels.length = n; }
     // 7. the finding: after the second tear, the next CAM reading becomes it (once per page load)
-    if (!s.findingDone && s.tears >= 2) {
+    if (!s.findingDone && s.tears >= 2 && s.vel < TEAR.read) {
       const camLabel = s.labels.find((l) => shape.nodeClass[l.node] === 3);
       if (camLabel) { s.finding = camLabel.node; s.findingDone = true; camLabel.text = FINDING; camLabel.finding = true; s.onFinding?.(camLabel.node); }
     }
@@ -223,8 +223,8 @@ export function createModel(shape, uniforms) {
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;
     s.tier0.on = false; s.tier0.since = -1;
     trailGrid.clear();
-    if (view) computeCamera(cam, uniforms, view, { yaw: 0, pitch: 0 }, [0, 0, 0]);
     publish();
+    if (view) computeCamera(cam, uniforms, view, { yaw: 0, pitch: 0 }, [0, 0, 0]);
     s.onFrame?.();
   }
 
@@ -258,7 +258,7 @@ export function createModel(shape, uniforms) {
   }
   // Row-1 hover: the class node nearest the word's rim point links and prints the word's own reading.
   function rowHover(classIndex, lon = 0, reading = null) {
-    if (s.forcedNode >= 0) hold[s.forcedNode] = 0;
+    if (s.forcedNode >= 0 && hold[s.forcedNode] === Infinity) hold[s.forcedNode] = 0;
     if (classIndex < 0) { s.forcedNode = -1; s.forcedText = null; return; }
     const rim = [Math.sin(lon), -1.2, Math.cos(lon)], l = Math.hypot(...rim);
     const [node] = nearestClassed(shape, rim.map((x) => x / l), 1, classIndex);

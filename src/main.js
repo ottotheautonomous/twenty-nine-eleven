@@ -132,7 +132,6 @@ function updateAmbient() {
   sentinel.setActive(looping);
   motionToggle.hidden = reducedMotion.matches || sentinel.type === 'static';
   motionToggle.setAttribute('aria-pressed', String(paused));
-  motionToggle.title = paused ? 'Resume motion' : 'Pause motion';
   $('#motion-icon').setAttribute('d', paused ? 'm7 5 7 5-7 5Z' : 'M7 5v10M13 5v10');
 }
 function applyMotionPolicy() {
@@ -192,7 +191,7 @@ if (still()) {
     labels.decodeInstrument();
     labels.countIn(.998).then(() => { integrityLive = true; });
   }, 2.3);
-  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; model.state.entered = true; armIdle(); });
+  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; model.state.entered = true; if (model.state.inScene) model.enter(); armIdle(); });
 }
 sentinel.enableSimulationAt(1.9);
 uniforms.u_motion.value = still() ? 0 : 1;

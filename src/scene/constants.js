@@ -15,7 +15,7 @@ export const EMBER = { coreR: 0.045, haloR: 0.42, hdr: 3.0, halo: 0.25, offset: 
 export const TIMING = { greet: 0.6, lose: 1.5, tier0Dwell: 0.4, tier0Radius: 0.3, sentryEvery: 9, sentryDur: 2.5, idleAfter: 4 };
 export const INTEGRITY = { rest: 0.998, slope: 0.7, floor: 0.85, tearRef: 0.3 };
 // A tear is one fast pass: the raw probe path crossed the shell within `window` s while lag velocity exceeded `vel`; re-armed below `calm`.
-export const TEAR = { vel: 0.35, window: 0.8, calm: 0.15 };
+export const TEAR = { vel: 0.35, window: 0.8, calm: 0.15, read: 0.05 };   // read: the finding latches only on a resting read
 export const COLORS = { ink: '#06080B', haze: '#0E1219', slate: '#383E4E', shadow: '#2A313A', mid: '#9AA7B4', hi: '#C3CDD6', rim: '#D7E9F7', ember: '#F0A65E', hot: '#FFD8A6', breach: '#E5484D' };
 export const hexRGB = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
 export const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));

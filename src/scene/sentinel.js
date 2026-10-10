@@ -59,12 +59,13 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   let active = false, lost = false, drawNow = false, pendingDelta = 0;
   let sceneTime = 0, simAt = 1.9, simAllowed = false, readyFired = false, readyCbs = [];
   // Governor state. rel = governed fraction of the DPR cap (GL); the ladder steps quality after the scale floor.
-  let rel = 1, cap = 1, scale = 1, ema = 1000 / 60, slow = 0, fast = 0, frozenUntil = 0, rows = tier.rowsStart || 0;
+  let rel = 1, cap = 1, scale = 1, ema = 1000 / 60, frozenUntil = 0, rows = tier.rowsStart || 0;
+  let winMs = 0, winN = 0, calm = 0, backoff = 1, probationUntil = 0;
   let period = 1000 / 60, sinceDraw = 0, lastRaf = 0, lastDrawAt = 0, refresh = 1000 / 60, refreshSeen = false, drawEma = 1000 / 60;
   let step = 0, cooldownUntil = 0, mpScale = 1;
   let stillPending = false, readoutEl = null;
   const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // per renderer: TIERS stay untouched
-  const LADDER_GL = ['bloom', 'rows', 'rows', 'rows', 'jacobi', 'fluidRes'];
+  const LADDER_GL = ['bloom', 'rows', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'];
   const LADDER_C2D = ['sprites', 'sprites', 'mp'];
   const FLUID_STEPS = [64, 96, 128];
 
@@ -123,23 +124,29 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     }
     renderer.setQuality?.(quality);
   }
+  // Governor: judge ~1 s windows of draw-to-draw time against the tier's rate (or the panel's, if slower).
+  // A slow window steps down (scale first on GL, then the ladder); ten calm windows earn one step back up,
+  // on probation: a step that fails within 4 s doubles the calm needed next time.
   function governor(ms) {
-    if (!governed() || !refreshSeen || performance.now() < frozenUntil) return;
-    if (isGL() ? sceneTime < 3 : !(model.state.simulate && sceneTime >= simAt + 1)) return;
+    if (!governed() || !refreshSeen || performance.now() < frozenUntil) { winMs = winN = 0; return; }
+    if (isGL() ? sceneTime < 3 : !(model.state.simulate && sceneTime >= simAt + 1)) { winMs = winN = 0; return; }
     ema = ema * 0.94 + ms * 0.06;
-    const target = Math.max(tier.fps === 30 || !isGL() ? 1000 / 30 : 1000 / 60, refresh);   // a real 30 Hz / Low Power panel raises the target itself
-    slow = ema > target * 1.2 ? slow + 1 : 0;
-    fast = ema < target * 0.7 ? fast + 1 : 0;
+    winMs += ms; if (++winN < (isGL() ? 60 : 30)) return;
+    const mean = winMs / winN; winMs = winN = 0;
+    const target = Math.max(tier.fps === 30 || !isGL() ? 1000 / 30 : 1000 / 60, refresh);
     const now = performance.now(), ladder = isGL() ? LADDER_GL : LADDER_C2D;
-    if (slow > 60) {
-      slow = 0;
+    if (mean > target * (isGL() ? 1.2 : 1.14)) {
+      calm = 0; backoff = now < probationUntil ? Math.min(8, backoff * 2) : 1;
       if (isGL() && rel > 0.56) { rel = Math.max(0.55, rel * 0.8); resize(); }
       else if (now >= cooldownUntil && step < ladder.length) { applyStep(ladder[step], -1); step++; cooldownUntil = now + 2000; frozenUntil = now + 2000; }
-    } else if (fast > 180) {
-      fast = 0;
-      if (step > 0 && now >= cooldownUntil) { step--; applyStep(ladder[step], +1); cooldownUntil = now + 2000; frozenUntil = now + 2000; }
-      else if (step === 0 && isGL() && rel < 1) { rel = Math.min(1, rel * 1.15); resize(); }
-    }
+    } else if (mean <= target * 1.05) {
+      if (++calm < 10 * backoff || now < cooldownUntil) return;
+      calm = 0;
+      if (step > 0) { step--; applyStep(ladder[step], +1); }
+      else if (isGL() && rel < 1) { rel = Math.min(1, rel * 1.15); resize(); }
+      else return;
+      probationUntil = now + 4000; cooldownUntil = now + 2000; frozenUntil = now + 2000;
+    } else calm = 0;
   }
 
   // Frame gate: draw on whole display refreshes at or above the tier's rate, from the raw rAF interval

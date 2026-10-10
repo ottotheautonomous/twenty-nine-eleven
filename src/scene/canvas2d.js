@@ -6,7 +6,7 @@ import { hexRGB, COLORS, NODES } from './constants.js';
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
 const TONES = [COLORS.shadow, COLORS.mid, COLORS.hi, COLORS.rim].map(hexRGB);
 const RADII = [2.0, 3.0, 4.0];                       // CSS px; multiplied by the backing scale
-const BUCKETS = [0.06, 0.12, 0.22, 0.35, 0.5];         // globalAlpha per intensity bucket
+const BUCKETS = [0.05, 0.1, 0.18, 0.28, 0.38];         // globalAlpha per intensity bucket
 
 function makeSprite(r, rgb) {
   const size = Math.ceil(r * 2 + 2), c = document.createElement('canvas');
@@ -166,7 +166,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
-      inten[i] = built * flick * boost * energy * lit * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
+      inten[i] = built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----

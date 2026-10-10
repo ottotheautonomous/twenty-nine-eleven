@@ -75,7 +75,7 @@ export function createLabels(root, instrument, shape) {
       items.push({ el, x: p.x, y: p.y, pitch: l.finding ? 32 : 18 });
     }
     if (phone) {
-      for (const it of items) { it.x = cam.shellPx.x / cam.scaleX; it.y = (cam.height - cam.shellPx.y) / cam.scaleY + R + 10; }
+      for (const it of items) { it.x = cam.shellPx.x / cam.scaleX; it.y = (cam.height - cam.shellPx.y) / cam.scaleY - R - 26; }   // a caption above the sphere, clear of the wordmark
     } else {
       for (const it of items) {
         const dx = it.x - ex, dy = it.y - ey, d = Math.hypot(dx, dy) || 1, min = 0.5 * R;
