@@ -14,7 +14,8 @@ uniform vec2 uA, uB;         // previous / current pointer, UV
 uniform float uRadius;       // see above
 uniform float uAspect;       // width / height
 uniform float uDecay;        // pow(0.985, ratio)
-uniform float uGrow;         // 1.0 = full max-dilation each frame; 0.0 = none
+uniform float uGrow;         // max-dilation share this frame: 1 - 0.65^ratio (0.35 per 60 Hz frame)
+uniform float uRatio;        // frame time / (1/60 s): the splat scales with it so 120 Hz paints like 60 Hz
 uniform float uTime;
 out vec4 o;
 float capsule(vec2 p, vec2 a, vec2 b) {
@@ -35,7 +36,7 @@ void main() {
   float grown = mix(prev.r, max(prev.r, n), uGrow);
   vec2 asp = vec2(uAspect, 1.0);
   float k = clamp(1.0 - capsule(vUv * asp, uA * asp, uB * asp) / max(uRadius, 1e-5), 0.0, 1.0);
-  k = uRadius > 1e-5 ? k * k * k : 0.0;
+  k = uRadius > 1e-5 ? k * k * k * min(1.0, uRatio) : 0.0;
   float v = min((grown + k) * uDecay, 1.0);
   float rim = max(v - prev.r, 0.0);
   o = vec4(v, rim, (prev.b + rim) * 0.9, 1.0);

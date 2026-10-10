@@ -118,7 +118,9 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     W = w; H = h;
     hdr.forEach((t) => t?.dispose());
     hdr = [createTarget(gl, W, H, hdrFmt), createTarget(gl, W, H, hdrFmt)];
-    trail?.dispose(); trail = createPair(gl, Math.max(1, Math.round(W / 5)), Math.max(1, Math.round(H / 5)), hdrFmt);
+    // Trail texels no finer than 4 CSS px: at native hi-DPI backing a 1/5 target spread the breach ~24 % less than v1.
+    const cssW = canvas.clientWidth || innerWidth, cssH = canvas.clientHeight || innerHeight;
+    trail?.dispose(); trail = createPair(gl, Math.max(1, Math.round(Math.min(W / 5, cssW / 4))), Math.max(1, Math.round(Math.min(H / 5, cssH / 4))), hdrFmt);
     bloom.resize(W, H);
     stillSeeded = false;
   }
@@ -151,7 +153,8 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform1i(p.uPrev, bindTex(gl, 0, trail.read.texture));
     gl.uniform2f(p.uA, t.ax, t.ay); gl.uniform2f(p.uB, t.bx, t.by);
     gl.uniform1f(p.uRadius, t.pressDisc ? 0.06 : t.radius);
-    gl.uniform1f(p.uAspect, W / H); gl.uniform1f(p.uDecay, Math.pow(0.985, ratio)); gl.uniform1f(p.uGrow, 0.35); gl.uniform1f(p.uTime, model.time % 1000);
+    gl.uniform1f(p.uAspect, W / H); gl.uniform1f(p.uDecay, Math.pow(0.985, ratio)); gl.uniform1f(p.uTime, model.time % 1000);
+    gl.uniform1f(p.uGrow, 1 - Math.pow(0.65, ratio)); gl.uniform1f(p.uRatio, t.pressDisc ? 1 : ratio);   // rate-independent: 120 Hz no longer tears twice as heavy
     blit(gl, trail.write); trail.swap();
     t.pressDisc = false;
   }

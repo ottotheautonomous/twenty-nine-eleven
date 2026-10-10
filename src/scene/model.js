@@ -87,6 +87,7 @@ export function createModel(shape, uniforms) {
   const plexus = createPlexusLogic({ maxNodes: NODES, k: 4, maxLinksPerNode: 1, growSec: 0.1, retractSec: 0.06, minMove: 0.05, hysteresis: 0.9 });
   const exposure = new Float32Array(NODES), shown = new Uint8Array(NODES), hold = new Float64Array(NODES);
   const trailGrid = createTrailGrid(48, 27);
+  const gridSeg = { acc: 0, ax: 0.5, ay: 0.5, radius: 0 };   // the grid's own segment since its last fixed-rate tick
   const cam = createCameraState();
   const s = {
     time: 0, simulate: false, inScene: false, returning: false, still: false, modal: false, keyboard: false,
@@ -123,7 +124,7 @@ export function createModel(shape, uniforms) {
     let rawSpeed = 0;
     if (s.pointerDirty) {
       const jump = Math.hypot(s.raw[0] - s.lastRaw[0], s.raw[1] - s.lastRaw[1]) > 0.6 || now - s.lastPointerAt > 150;
-      if (jump) { pf.set(s.raw[0], s.raw[1]); s.trail.ax = s.trail.bx = s.raw[0] * 0.5 + 0.5; s.trail.ay = s.trail.by = s.raw[1] * 0.5 + 0.5; s.probeJump = true; }
+      if (jump) { pf.set(s.raw[0], s.raw[1]); s.trail.ax = s.trail.bx = s.raw[0] * 0.5 + 0.5; s.trail.ay = s.trail.by = s.raw[1] * 0.5 + 0.5; s.probeJump = true; gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0; }
       else {
         pf.target(s.raw[0], s.raw[1]);
         if (!s.probeJump) rawSpeed = Math.hypot((s.raw[0] - s.lastRaw[0]) * s.aspect, s.raw[1] - s.lastRaw[1]) / Math.max(dt, 1e-3);   // NDC-height units per second
@@ -167,7 +168,17 @@ export function createModel(shape, uniforms) {
     const moved = Math.hypot(rx - s.trail.bx, ry - s.trail.by) > 1e-4;
     if (!s.trail.pressDisc) { s.trail.bx = rx; s.trail.by = ry; }
     s.trail.radius = moved ? LAG.trailRadius * smoothstep(0.25, 0.7, s.vel) : 0;
-    if (motion && s.simulate) { const n = ratio > 1.5 ? Math.round(ratio) : 1; for (let q = 0; q < n; q++) trailGrid.step(s.trail, ratio / n, s.aspect); }
+    // The grid ticks at a fixed ~60 Hz over the segment since its last tick: a pass paints the same at 30/60/120/144 Hz
+    // (per-frame ticks made every brisk gesture on a 120 Hz screen twice as heavy).
+    if (motion && s.simulate) {
+      gridSeg.acc += ratio; gridSeg.radius = Math.max(gridSeg.radius, s.trail.radius);
+      if (gridSeg.acc >= 0.999) {
+        const r = gridSeg.acc < 1.5 ? Math.min(gridSeg.acc, 1) : gridSeg.acc, n = r > 1.5 ? Math.round(r) : 1;
+        const seg = { ax: gridSeg.ax, ay: gridSeg.ay, bx: s.trail.bx, by: s.trail.by, radius: gridSeg.radius };
+        for (let q = 0; q < n; q++) trailGrid.step(seg, r / n, s.aspect);
+        gridSeg.acc = Math.max(0, gridSeg.acc - r); gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
+      }
+    }
     const meanDisc = trailGrid.meanInside(cam.shellPx, view.width, view.height);
     s.tear = Math.min(1, meanDisc / INTEGRITY.tearRef);
     s.integrity = clamp(INTEGRITY.rest - INTEGRITY.slope * meanDisc, INTEGRITY.floor, INTEGRITY.rest);
@@ -269,6 +280,7 @@ export function createModel(shape, uniforms) {
     s.trail.pressDisc = true;
     s.trail.ax = s.trail.bx = nx * 0.5 + 0.5; s.trail.ay = s.trail.by = ny * 0.5 + 0.5;
     if (s.simulate) trailGrid.disc(s.trail.ax, s.trail.ay, 0.06, s.aspect);
+    gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
   }
   function tap(nx, ny) {
     pointer(nx, ny, performance.now()); pf.set(nx, ny);
