@@ -92,7 +92,8 @@ styleEffect(wordmark, { x: nameX, y: nameY, '--visitor-x': textLightX, '--visito
 styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(verseSurface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 model.state.onFrame = () => {
-  nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3);
+  if (still()) { nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3); }
+  else { nameX.set(-model.orbitNorm[0] * 6); nameY.set(-model.orbitNorm[1] * 3); }   // the springs smooth the lean (a jump per frame stepped it)
   if (integrityLive) labels.setIntegrity(model.state.integrity, model.state.deficit > 0 || uniforms.u_motion.value === 0);   // every frame while the ledger is open; at once when it is cleared for a still
 };
 model.state.onGreet = lon => { if (!still()) { ring(lon); boost('u_boostGreet', .15, .6); } };

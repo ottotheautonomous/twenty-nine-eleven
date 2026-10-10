@@ -60,7 +60,7 @@ html:not(.js) .mark-still, html[data-renderer='static'] .mark-still { display: b
 .instrument-value { display: inline-block; width: 3.4em; }   /* "0.000" in tabular mono, fixed: a rolling or plain value never shifts its neighbours */
 .instrument-state { flex: none; min-width: 8.1em; }   /* a fixed HUD field: "· RESTORING" fits with room, so no state word ever moves FINDINGS */
 
-h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em; margin: 0; font-size: clamp(42px, 4.9vw, 70px); font-weight: 500; line-height: .95; letter-spacing: -.025em; text-shadow: 0 2px 30px #03081099; }
+h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em; margin: 0; font-size: clamp(42px, 4.9vw, 70px); font-weight: 500; line-height: .95; letter-spacing: -.025em; text-shadow: 0 2px 30px #03081099; will-change: transform; }   /* its own layer: the camera lean moves in sub-pixel steps, not 1 px jumps */
 .name-mask { display: inline-block; overflow: hidden; padding: .06em .04em .12em; margin: -.06em -.04em -.12em; }
 .name-word { display: inline-block; white-space: nowrap; color: var(--silver);
   background-image: radial-gradient(ellipse 60% 110% at var(--visitor-x) var(--visitor-y), #FFF3D8 0%, #EEF2F4 32%, #B8C3CC 78%);
