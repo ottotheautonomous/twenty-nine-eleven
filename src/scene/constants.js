@@ -23,7 +23,7 @@ export const TIMING = { greet: 0.6, lose: 1.5, tier0Dwell: 0.4, tier0Radius: 0.3
 // with half-life `heal` and seals under `sealAt`. Deficits under `event` heal silently (no word, no wave). Painting aborts.
 export const INTEGRITY = { rest: 0.998, floor: 0.12, live: 1.6, liveCap: 0.3, acc: 0.78, active: 0.1, quiet: 1.0,
                            event: 0.09, release: 0.35, roll: 0.3, heal: 0.85, sealAt: 0.002, wave: 1.2, tearRef: 0.3 };
-// The resync front: a spherical band leaving the core, radius front * inOut3(t) over INTEGRITY.wave s. kick: velocity toward
+// The resync front: a ring leaving the ember across the visible disc (view-space radius), front * inOut3(t) over INTEGRITY.wave s. kick: velocity toward
 // home as it passes; seal: per-60 Hz-frame fraction of trail cleared behind it; boost/grow: the tap's own light; ember: core pulse.
 export const RESET = { front: 2.4, band: 0.14, kick: 0.012, seal: 0.35, boost: 1.5, grow: 0.3, ember: 0.3 };
 // A tear is one fast pass: the raw probe path crossed the shell within `window` s while lag velocity exceeded `vel`; re-armed below `calm`.

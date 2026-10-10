@@ -17,6 +17,8 @@ uniform float uDecay;        // pow(0.985, ratio)
 uniform float uGrow;         // max-dilation share this frame: 1 - 0.65^ratio (0.35 per 60 Hz frame)
 uniform float uRatio;        // frame time / (1/60 s): the splat scales with it so 120 Hz paints like 60 Hz
 uniform float uTime;
+uniform vec3 uSeal;          // the resync front: centre (UV, y up) and radius (height units); the trail is cleared behind it
+uniform float uSealK;        // fraction cleared this frame: 1 - (1 - 0.35 * amp)^ratio; 0 = none
 out vec4 o;
 float capsule(vec2 p, vec2 a, vec2 b) {
   vec2 pa = p - a, ba = b - a;
@@ -38,6 +40,7 @@ void main() {
   float k = clamp(1.0 - capsule(vUv * asp, uA * asp, uB * asp) / max(uRadius, 1e-5), 0.0, 1.0);
   k = uRadius > 1e-5 ? k * k * k * min(1.0, uRatio) : 0.0;
   float v = min((grown + k) * uDecay, 1.0);
+  if (uSealK > 0.0) v *= 1.0 - uSealK * (1.0 - smoothstep(uSeal.z - 0.06, uSeal.z, length((vUv - uSeal.xy) * asp)));   // the seal is literal
   float rim = max(v - prev.r, 0.0);
   o = vec4(v, rim, (prev.b + rim) * 0.9, 1.0);
 }

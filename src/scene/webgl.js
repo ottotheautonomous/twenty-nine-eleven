@@ -5,7 +5,7 @@ import { createBloom } from './bloom.js';
 import { loadBlueNoise, blueNoiseOffset } from './bluenoise.js';
 import { createPlexusRenderer } from './plexus.js';
 import { frameRatio } from './damp.js';
-import { COLORS, NODES, hexRGB, linearRGB } from './constants.js';
+import { COLORS, NODES, RESET, hexRGB, linearRGB } from './constants.js';
 import bnUrl from './bn64-rgb.png?url';
 import noiseSrc from './glsl/noise.glsl?raw';
 import sdfSrc from './glsl/sdf.glsl?raw';
@@ -155,6 +155,9 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform1f(p.uRadius, t.pressDisc ? 0.06 : t.radius);
     gl.uniform1f(p.uAspect, W / H); gl.uniform1f(p.uDecay, Math.pow(0.985, ratio)); gl.uniform1f(p.uTime, model.time % 1000);
     gl.uniform1f(p.uGrow, 1 - Math.pow(0.65, ratio)); gl.uniform1f(p.uRatio, t.pressDisc ? 1 : ratio);   // rate-independent: 120 Hz no longer tears twice as heavy
+    const cam = model.cam, s = model.state, sealing = s.front >= 0 && s.ampS > 1e-3 && cam.ready;
+    gl.uniform3f(p.uSeal, cam.shellPx.x / Math.max(1, cam.width), cam.shellPx.y / Math.max(1, cam.height), s.front * cam.shellPx.r / Math.max(1, cam.height));
+    gl.uniform1f(p.uSealK, sealing ? 1 - Math.pow(1 - RESET.seal * s.ampS, ratio) : 0);
     blit(gl, trail.write); trail.swap();
     t.pressDisc = false;
   }

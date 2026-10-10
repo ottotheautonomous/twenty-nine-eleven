@@ -47,6 +47,11 @@ export function createTrailGrid(w = 48, h = 27) {
       for (let i = 0; i < tmp.length; i++) tmp[i] = Math.min(tmp[i] * decay, 1);
       const t = v; v = tmp; tmp = t;
     },
+    seal(cx, cy, rPx, width, height, k) {   // the resync front clears the grid behind it (cell centres, backing px, y up)
+      if (k <= 0 || rPx <= 0) return;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+        if (Math.hypot((x + 0.5) / w * width - cx, (y + 0.5) / h * height - cy) < rPx) v[y * w + x] *= 1 - k;
+    },
     disc(u, vv, r, aspect = 16 / 9) { splat(u, vv, u, vv, Math.max(r, 1.2 / h), aspect, v); for (let i = 0; i < v.length; i++) v[i] = Math.min(v[i], 1); },
     at(u, vv) { const x = clamp(Math.floor(u * w), 0, w - 1), y = clamp(Math.floor(vv * h), 0, h - 1); return v[y * w + x]; },
     // Mean of cells whose centre lies inside the shell's screen disc (backing px, y up).
@@ -113,6 +118,7 @@ export function createModel(shape, uniforms) {
     u.u_probeRX.value = s.probeRaw[0]; u.u_probeRY.value = s.probeRaw[1]; u.u_probeRZ.value = s.probeRaw[2];
     u.u_pokeX.value = s.probeVel[0]; u.u_pokeY.value = s.probeVel[1]; u.u_pokeZ.value = s.probeVel[2]; u.u_poke.value = s.poke;
     u.u_handDX.value = s.handDir[0]; u.u_handDY.value = s.handDir[1]; u.u_handDZ.value = s.handDir[2];
+    u.u_resetFront.value = s.front; u.u_resetAmp.value = s.ampS;
   }
 
   function step(dtMs, view) {
@@ -204,6 +210,8 @@ export function createModel(shape, uniforms) {
       } else { s.damage = 0; s.deficit = 0; }
       s.integrity = I.rest - s.deficit;
       s.tear = Math.min(1, Math.max(meanDisc / I.tearRef, s.deficit / 0.45));   // the ember stays dimmed by the ledger until it seals
+      s.ampS += ((s.resetT >= 0 && s.simulate ? s.resetAmp : 0) - s.ampS) * (1 - Math.pow(0.7, ratio));   // 6-frame in/out: an abort never pops
+      if (s.resetT >= 0 && s.ampS > 1e-3) trailGrid.seal(cam.shellPx.x, cam.shellPx.y, s.front * cam.shellPx.r, view.width, view.height, 1 - Math.pow(1 - RESET.seal * s.ampS, ratio));
     }
     // 5b. a tear = one fast pass across the shell; re-armed once the probe calms
     {

@@ -1,6 +1,6 @@
 import { frameRatio, damp, friction, smoothstep, clamp } from './damp.js';
 import { projectPx } from './camera.js';
-import { hexRGB, COLORS, NODES, LAG, HAND } from './constants.js';
+import { hexRGB, COLORS, NODES, LAG, HAND, RESET } from './constants.js';
 
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
@@ -101,6 +101,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     const P = s.probeRaw, k06 = damp(LAG.particle, ratio), build = u.u_build.value, open = u.u_open.value, flinch = u.u_flinch.value;
     const PR = s.probeRaw, PV = s.probeVel, poke = s.poke, HD = s.handDir;   // the hand (measured across the view ray HD)
     const handW = (al) => 1 + (HAND.back - 1) * smoothstep(-0.2, 0.2, al);   // near face 1, far side HAND.back
+    const RF = s.front, RA = s.ampS, RB = RESET.band;                           // the resync front (radius R, eased amp, band)
     const tight = u.u_tight.value, idleU = u.u_idle.value, fr = friction(0.9, ratio), sim = motion && s.simulate;
     const view4 = cam.view, VP = cam.viewProj, right = cam.right, up = cam.up, L = cam.lightDir;
     const ringLon = u.u_ringLon.value, ringPhase = u.u_ringPhase.value, ringAmp = u.u_ringAmp.value;
@@ -138,9 +139,16 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
           const sh = hand * HAND.shove, dr = hand * HAND.drag;
           ax += qx / hd * sh + PV[0] * dr; ay += qy / hd * sh + PV[1] * dr; az += qz / hd * sh + PV[2] * dr;
         }
+        // the resync front: kicked home as it passes; behind it the breach no longer weakens the spring (as SIM_FS)
+        let behind = 0;
+        if (RA > 1e-3) {
+          const rs = Math.hypot(vxh, vyh), dfr = rs - RF, wave = RA * Math.exp(-dfr * dfr / (RB * RB));   // view-space radius of the home
+          behind = RA * (1 - smoothstep(RF - 0.25, RF, rs));
+          ax += (tx - px) * RESET.kick * wave; ay += (ty - py) * RESET.kick * wave; az += (tz - pz) * RESET.kick * wave;
+        }
         const sw = 2e-4 * (1 - 0.5 * tight) * (0.7 + 0.3 * r);
         ax += Math.sin(py * 7 + time * (1 + 0.7 * r)) * sw; ay += Math.sin(pz * 7 + time * 0.8) * sw; az += Math.sin(px * 7 - time * 0.6) * sw;
-        const k = 1e-3 * (1 + 0.3 * tight) * built * (1 - 0.65 * fl) * (1 - 0.7 * tr) * 6;   // stiffer than GL: no SDF attraction here
+        const k = 1e-3 * (1 + 0.3 * tight) * built * (1 - 0.65 * fl) * (1 - 0.7 * tr * (1 - behind)) * 6;   // stiffer than GL: no SDF attraction here
         vx[i] = (vx[i] + (ax + (tx - px) * k) * ratio) * fr; vy[i] = (vy[i] + (ay + (ty - py) * k) * ratio) * fr; vz[i] = (vz[i] + (az + (tz - pz) * k) * ratio) * fr;
         px += vx[i] * ratio; py += vy[i] * ratio; pz += vz[i] * ratio;
         ox[i] = px - hx; oy[i] = py - hy; oz[i] = pz - hz;
@@ -166,8 +174,9 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const tap = tapT > 0 && tapT < 1 ? Math.exp(-(((Math.hypot(hx - tapX, hy - tapY, hz - tapZ) - 2.4 * tapT) / 0.14) ** 2)) * (1 - tapT) : 0;
       const sen = sentry > 0 ? 0.15 * Math.exp(-(((0.5 + 0.5 * (hx * KEY[0] + hy * KEY[1] + hz * KEY[2]) / nl - (1 - sentry)) / 0.08) ** 2)) : 0;
       const flick = r < 0.08 ? 0.6 + 0.4 * Math.sin(0.8 * time + 97 * r) * Math.sin(1.73 * time + 31 * r) : 1;
-      const grow = 1 + 0.3 * (ring + tap) + 0.12 * d2[i];
-      const boost = 1 + 1.5 * (ring + tap) + sen;
+      const dfr = Math.hypot(vxh, vyh) - RF, wave = RA > 1e-3 ? RA * Math.exp(-dfr * dfr / (RB * RB)) : 0;   // the resync ring's light (the tap's vocabulary)
+      const grow = 1 + 0.3 * (ring + tap + wave) + 0.12 * d2[i];
+      const boost = 1 + 1.5 * (ring + tap + wave) + sen;
       const lit = 0.25 + 0.75 * diff;
       let tn = lit < 0.35 ? 0 : lit < 0.62 ? 1 : 2;
       let touch = 0;
@@ -175,7 +184,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
         const dx_ = px - PR[0], dy_ = py - PR[1], dz_ = pz - PR[2], al = dx_ * HD[0] + dy_ * HD[1] + dz_ * HD[2];
         let hk2 = 1 - smoothstep(0, 1.1 * HAND.radius, Math.hypot(dx_ - HD[0] * al, dy_ - HD[1] * al, dz_ - HD[2] * al)); hk2 *= hk2 * handW(al); touch = poke * hk2;
       }
-      if (speed > 0.004 || tr2 > 0.25 || d2[i] > 0.45 || touch > 0.3) tn = 3;
+      if (speed > 0.004 || tr2 > 0.25 || d2[i] > 0.45 || touch > 0.3 || wave > 0.3) tn = 3;
       // perspective size: nearer sprites larger; energy-conserving intensity
       const depth = w > 0 ? cam.dist / w : 1;
       const grain = (r * 13.7) % 1;                    // per-particle grain, fixed for life

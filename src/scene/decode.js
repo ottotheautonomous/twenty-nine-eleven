@@ -94,7 +94,7 @@ export function decode(el, {
   frame.render(paint, true);             // keepAlive: runs every frame until cancelled
   const mark = () => { dirty = true; };
   st.controls = [
-    animate(0, 1, { duration: alphaDuration, delay, ease: 'linear', onUpdate: (v) => { p.a = v; mark(); } }),
+    ...(useAlpha ? [animate(0, 1, { duration: alphaDuration, delay, ease: 'linear', onUpdate: (v) => { p.a = v; mark(); } })] : []),   // no fade: no fade timer either
     animate(0, 1, { duration, delay, ease, onUpdate: (v) => { p.s = v; mark(); } }),
   ];
   return Promise.all(st.controls).then(() => {

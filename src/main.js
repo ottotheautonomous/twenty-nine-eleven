@@ -4,6 +4,7 @@ import { createSentinel } from './scene/sentinel.js';
 import { createTextMotion } from './text-motion.js';
 import { uniforms, engage, idle, settled } from './scene-state.js';
 import { CLASS, ROW_READING } from './scene/shape.js';
+import { RESET } from './scene/constants.js';
 import { decode, stopDecode } from './scene/decode.js';
 import { wrapWords } from './verse-light.js';
 
@@ -60,7 +61,8 @@ let lastDrawnEngage = 0;
 let current = null;            // the open dialog's descriptor (one modal at a time)
 let verseActive = false;
 let verseHover = [];
-const still =() => reducedMotion.matches || paused || params.has('still');
+let restoring = false;         // the instrument reads RESTORING from the reset's start until it seals or aborts
+const still = () => reducedMotion.matches || paused || params.has('still');
 
 // Lift the CSS entrance gate without a flash: targets start transparent inline.
 const entering = [canvas, instrument, ...words, ...document.querySelectorAll('[data-enter], .services li'), motionToggle];
@@ -94,7 +96,20 @@ model.state.onFrame = () => {
   if (integrityLive) labels.setIntegrity(model.state.integrity, model.state.deficit > 0);   // every frame while the ledger is open
 };
 model.state.onGreet = lon => { if (!still()) { ring(lon); boost('u_boostGreet', .15, .6); } };
-model.state.onState = word => { if (current?.name !== 'verse') labels.setState(word); };   // the verse holds PURPOSE until it closes
+model.state.onState = word => { if (current?.name !== 'verse' && !restoring) labels.setState(word); };   // the verse holds PURPOSE; a reset holds RESTORING
+// The reset, a second after the hand stops (model.js step 5): the ember pulses as the resync front leaves it and the
+// instrument declares RESTORING; when the front clears the shell the digits roll once to the released value; at the seal
+// the word returns and the ember exhales. Trivial damage (amp 0) is silent. Text changes in place; nothing moves.
+model.state.onReset = (phase, value, amp) => {
+  if ((phase === 'sealed' || phase === 'abort') && restoring) {
+    restoring = false;
+    if (!still() && current?.name !== 'verse') labels.setState(model.state.state);
+  }
+  if (still() || !integrityLive || modalState !== 'closed') return;
+  if (phase === 'start' && amp > 0) { restoring = true; labels.setState('RESTORING'); boost('u_boostPress', RESET.ember * amp, .45); }
+  else if (phase === 'release' && amp > 0) labels.rollIntegrity(value);
+  else if (phase === 'sealed' && amp > 0) boost('u_boostGreet', .15, .6);
+};
 model.state.onTier0 = on => { animate(uniforms, { u_tier0: on ? 1 : 0 }, { duration: on ? .5 : .4, ease }); labels.showTier0(on); };
 model.state.onFinding = node => labels.setFindings(node);
 // When the loop is idle (paused, reduced motion, modal open) engagement still redraws the composed frame.
@@ -148,6 +163,7 @@ function applyMotionPolicy() {
   uniforms.u_motion.value = still() ? 0 : 1;
   if (still()) {
     labels.hideAll(); stopSentry();
+    if (restoring) { restoring = false; labels.setState(model.state.state); }   // still: the ledger is cleared, so is the word
     const t0 = model.state.tier0; if (t0.on) { t0.on = false; t0.since = -1; }
     animate(uniforms, current?.name === 'verse' ? { u_tier0: 0, u_classAmp: 0 } : { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();   // the open verse owns warm/tight
     model.rowHover(-1); rowIntent = 0;

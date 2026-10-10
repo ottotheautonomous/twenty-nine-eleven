@@ -5,7 +5,7 @@
 // precision); a third MRT attachment carries the cascaded proximity response,
 // the warm term and the build; the spring weakens under the trail; morphing removed.
 import { createProgram, bindTex, FULLSCREEN_VS } from './gl.js';
-import { LAG, HAND } from './constants.js';
+import { LAG, HAND, RESET } from './constants.js';
 
 const SIM_FS = (noiseSrc, sdfSrc) => noiseSrc + sdfSrc + `
 in vec2 vUv;
@@ -18,6 +18,7 @@ uniform float uBuild, uOpen, uFlinch, uTight, uIdle, uPresent;
 uniform vec3 uProbeRaw, uPokeVel, uHandDir;   // raw probe on the centre plane; its world velocity (R/s, |v| <= 4); the view ray through it
 uniform float uPoke, uShove, uDrag;    // raw pointer speed 0..1 (0.15 s tail); impulse gains
 uniform vec3 uHand;                    // reach across the ray (R), far side's share, per-particle spread
+uniform vec3 uReset; uniform float uKick;   // the resync front: (radius R, amp, band sigma); kick toward home as it passes
 uniform float uFluidPush, uSwirl, uSwirlFreq, uSpring, uAttract, uFriction, uSpeedLerp, uWrap, uBound;
 layout(location = 0) out vec4 oOff;            // xyz offset from home, w = wrap-diffuse lighting
 layout(location = 1) out vec4 oVel;            // xyz, w = smoothed speed
@@ -49,6 +50,12 @@ void main() {
   vec2 f = on ? texture(uFluid, suv).xy : vec2(0.0);
   float trail = on ? texture(uTrail, suv).r : 0.0;
   float fl = length(f);
+  // The resync front (after the hand stops): a ring leaving the ember across the visible disc (view-space radius of the
+  // home, like the build front: a sphere around the core would cross the shell everywhere at once and only flash);
+  // particles are kicked home as it passes and the breach stops weakening the spring behind it. amp 0 = nothing.
+  float rs = length(hv.xy), dfr = rs - uReset.x;
+  float wave = uReset.y * exp(-dfr * dfr / (uReset.z * uReset.z));
+  float behind = uReset.y * (1.0 - smoothstep(uReset.x - 0.25, uReset.x, rs));
 
   // 0 the hand: an instant, velocity-weighted shove where the pointer moves. Measured across the view ray through the raw
   //   probe (which sits on the centre plane, inside the shell), so the face under the hand feels it; the far side gets
@@ -64,7 +71,8 @@ void main() {
   v += (uCamRight * f.x + uCamUp * f.y) * uFluidPush * uRatio;                                   // 1 fluid push (the tear)
   vec3 n = BitangentNoise4D(vec4(p * uSwirlFreq, uTime * (1.0 + 0.7 * r)));
   v += n * uSwirl * (1.0 - 0.5 * uTight) * (0.7 + 0.3 * r) * uRatio;                            // 2 swirl
-  float k = uSpring * (1.0 + 0.3 * uTight) * built * (1.0 - 0.65 * min(fl, 1.0)) * (1.0 - 0.7 * trail);
+  v += (homeT - p) * uKick * wave * uRatio;                                                     // the front kicks it home
+  float k = uSpring * (1.0 + 0.3 * uTight) * built * (1.0 - 0.65 * min(fl, 1.0)) * (1.0 - 0.7 * trail * (1.0 - behind));
   v += (homeT - p) * k * uRatio;                                                                 // 3 spring
   float d = sdfScene(p / scale) * scale;
   vec3 g = sdfGradientTetra(p / scale, 1e-3);
@@ -94,6 +102,7 @@ uniform vec4 uTap;           // (x, y, z, t); t outside (0,1) = none
 uniform float uSentry;       // idle sentry band phase 0..1; 0 = none
 uniform vec3 uKey;           // key light direction (sentry band origin)
 uniform vec3 uProbeRaw, uHandDir, uHand; uniform float uPoke;   // the hand: instant light where it moves
+uniform vec3 uReset;         // the resync front (radius R, amp, band sigma): the tap's own light, as a ring leaving the ember
 out float vLight, vSpeed, vFade, vD2, vWarm, vBuilt, vBoost, vGrow;
 void main() {
   int w = textureSize(uHome, 0).x;
@@ -113,14 +122,16 @@ void main() {
   float sentry = uSentry > 0.0 ? 0.15 * exp(-pow((0.5 + 0.5 * dot(normalize(home), uKey) - (1.0 - uSentry)) / 0.08, 2.0)) : 0.0;
   float flick = r < 0.08 ? 0.6 + 0.4 * sin(0.8 * uTime + 97.0 * r) * sin(1.73 * uTime + 31.0 * r) : 1.0;
 
-  float grow = 1.0 + 0.3 * (ring + tap) + 0.12 * A.y;
+  float dfr = length((uView * vec4(home, 1.0)).xy) - uReset.x;          // the resync ring: view-space radius from the ember
+  float wave = uReset.y * exp(-dfr * dfr / (uReset.z * uReset.z));
+  float grow = 1.0 + 0.3 * (ring + tap + wave) + 0.12 * A.y;
   float size = uSizeK / max(-vp.z, 1e-3) * grow;                       // one size for all: per-particle grain clumped the tube into blobs
   gl_PointSize = clamp(size, 1.0, uMaxPoint);
   vFade = clamp(size * size, 0.0, 1.0) * flick;
   vec3 dp = p - uProbeRaw; float along = dot(dp, uHandDir);                  // the hand, measured across the view ray through the pointer
   float hk = 1.0 - smoothstep(0.0, 1.1 * uHand.x, length(dp - uHandDir * along)); hk *= hk * mix(1.0, uHand.y, smoothstep(-0.2, 0.2, along));
   float touch = uPoke * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
-  vBoost = 1.0 + 1.5 * (ring + tap) + sentry + touch;
+  vBoost = 1.0 + 1.5 * (ring + tap + wave) + sentry + touch;
   vGrow = grow;
   vLight = O.w; vSpeed = V.w; vD2 = A.y; vWarm = A.z; vBuilt = A.w;
 }`;
@@ -219,6 +230,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3f(s.uProbeRaw, u.u_probeRX.value, u.u_probeRY.value, u.u_probeRZ.value); gl.uniform3f(s.uPokeVel, u.u_pokeX.value, u.u_pokeY.value, u.u_pokeZ.value);
     gl.uniform1f(s.uPoke, u.u_poke.value); gl.uniform1f(s.uShove, cfg.shove); gl.uniform1f(s.uDrag, cfg.drag);
     gl.uniform3f(s.uHandDir, u.u_handDX.value, u.u_handDY.value, u.u_handDZ.value); gl.uniform3f(s.uHand, HAND.radius, HAND.back, HAND.spread);
+    gl.uniform3f(s.uReset, u.u_resetFront.value, u.u_resetAmp.value, RESET.band); gl.uniform1f(s.uKick, RESET.kick);
     gl.uniform1f(s.uFluidPush, cfg.fluidPush); gl.uniform1f(s.uSwirl, cfg.swirl); gl.uniform1f(s.uSwirlFreq, cfg.swirlFreq);
     gl.uniform1f(s.uSpring, cfg.spring); gl.uniform1f(s.uAttract, cfg.attract);
     gl.uniform1f(s.uFriction, Math.pow(cfg.friction, ratio)); gl.uniform1f(s.uSpeedLerp, 1 - Math.pow(1 - cfg.speedLerp, ratio));
@@ -244,6 +256,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform1f(r.uSentry, u.u_sentry.value); gl.uniform3fv(r.uKey, cam.lightDir);
     gl.uniform3f(r.uProbeRaw, u.u_probeRX.value, u.u_probeRY.value, u.u_probeRZ.value); gl.uniform1f(r.uPoke, u.u_poke.value);
     gl.uniform3f(r.uHandDir, u.u_handDX.value, u.u_handDY.value, u.u_handDZ.value); gl.uniform3f(r.uHand, HAND.radius, HAND.back, HAND.spread);
+    gl.uniform3f(r.uReset, u.u_resetFront.value, u.u_resetAmp.value, RESET.band);
     gl.uniform3fv(r.uColDark, opts.colDark); gl.uniform3fv(r.uColLight, opts.colLight); gl.uniform3fv(r.uColFast, opts.colFast); gl.uniform3fv(r.uEmberCol, opts.ember);
     gl.uniform3fv(r.uLightView, cam.lightView);
     gl.uniform1f(r.uIntensity, opts.intensity); gl.uniform1f(r.uWrapR, cfg.wrap); gl.uniform1f(r.uEmberLevel, opts.emberLevel);
