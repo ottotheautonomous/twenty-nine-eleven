@@ -93,7 +93,7 @@ styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(verseSurface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 model.state.onFrame = () => {
   nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3);
-  if (integrityLive) labels.setIntegrity(model.state.integrity, model.state.deficit > 0);   // every frame while the ledger is open
+  if (integrityLive) labels.setIntegrity(model.state.integrity, model.state.deficit > 0 || uniforms.u_motion.value === 0);   // every frame while the ledger is open; at once when it is cleared for a still
 };
 model.state.onGreet = lon => { if (!still()) { ring(lon); boost('u_boostGreet', .15, .6); } };
 model.state.onState = word => { if (current?.name !== 'verse' && !restoring) labels.setState(word); };   // the verse holds PURPOSE; a reset holds RESTORING
@@ -163,6 +163,7 @@ function applyMotionPolicy() {
   uniforms.u_motion.value = still() ? 0 : 1;
   if (still()) {
     labels.hideAll(); stopSentry();
+    labels.cancelRoll();
     if (restoring) { restoring = false; labels.setState(model.state.state); }   // still: the ledger is cleared, so is the word
     const t0 = model.state.tier0; if (t0.on) { t0.on = false; t0.since = -1; }
     animate(uniforms, current?.name === 'verse' ? { u_tier0: 0, u_classAmp: 0 } : { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();   // the open verse owns warm/tight
