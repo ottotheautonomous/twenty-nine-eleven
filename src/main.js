@@ -106,7 +106,7 @@ model.state.onReset = (phase, value, amp) => {
     if (!still() && current?.name !== 'verse') labels.setState(model.state.state);
   }
   if (still() || !integrityLive || modalState !== 'closed') return;
-  if (phase === 'start' && amp > 0) { restoring = true; labels.setState('RESTORING'); boost('u_boostPress', RESET.ember * amp, .45); }
+  if (phase === 'start' && amp > 0) { restoring = true; labels.setState('RESTORING'); boost('u_boostPress', RESET.ember * amp, .6); }   // the click's own flare
   else if (phase === 'release' && amp > 0) labels.rollIntegrity(value);
   else if (phase === 'sealed' && amp > 0) boost('u_boostGreet', .15, .6);
 };
