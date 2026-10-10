@@ -220,7 +220,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.clearColor(inkLinear[0], inkLinear[1], inkLinear[2], 0); gl.clear(gl.COLOR_BUFFER_BIT);
     particles.draw(cam, rows * tier.side[0], u, drawOpts(time));
     if (u.u_classAmp.value > 0.001) classNodes.draw(cam, u, (cam.scaleY || 1) * hdrScale);
-    if (model.linkAlpha > 0.001) plexus.draw(shape.nodes, cam.viewProj, [0.84, 0.91, 0.97], HAIRLINE_HDR * model.linkAlpha);
+    if (model.linkAlpha > 0.001) plexus.draw(shape.nodes, cam.viewProj, [0.84, 0.91, 0.97], HAIRLINE_HDR * model.linkAlpha * Math.max(1, (cam.scaleY || 1) * hdrScale / 1.25));   // 1-device-px lines: keep v1's light per link at native DPI
     if (motion === 0) {   // a still has no previous frame with the same geometry: give the ember this frame's coverage
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, cur.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prev.fbo);
       gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);

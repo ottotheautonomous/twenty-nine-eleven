@@ -67,8 +67,10 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   let step = 0, cooldownUntil = 0, mpScale = 1;
   let stillPending = false, readoutEl = null;
   const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // per renderer: TIERS stay untouched
-  const LADDER_GL = ['rows', 'bloom', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'];   // sheds the doubled rows before softening HDR
-  const LADDER_C2D = ['sprites', 'sprites', 'sprites', 'sprites', 'mp'];                   // 3000 -> 1000 in 500s, then resolution
+  // Only xe doubled its rows: there the first rung sheds them (before resolution and before HDR softens); other tiers keep v1's order.
+  const xeRows = (tier.rowsStart || 0) > 256;
+  const LADDER_GL = xeRows ? ['rows', 'bloom', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'] : ['bloom', 'rows', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'];
+  const LADDER_C2D = ['sprites', 'sprites', 'mp'];                                         // 3000 -> 2000 -> 1000, then resolution (three rungs, as v1)
   const FLUID_STEPS = [64, 96, 128];
 
   function budget() {
@@ -114,7 +116,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // One ladder step (dir -1 = cheaper, +1 = richer), clamped to the tier's own maxima.
   function applyStep(kind, dir) {
     if (kind === 'rows') { rows = dir < 0 ? Math.max(tier.rowsStart / 8, rows / 2) : Math.min(tier.rowsStart, rows * 2); renderer.setRows?.(rows); return; }
-    if (kind === 'sprites') { const n = (renderer.sprites || 3000) + (dir < 0 ? -500 : 500); renderer.setSprites?.(Math.max(1000, Math.min(tier.sprites || 3000, n))); return; }
+    if (kind === 'sprites') { const n = (renderer.sprites || 3000) + (dir < 0 ? -1000 : 1000); renderer.setSprites?.(Math.max(1000, Math.min(tier.sprites || 3000, n))); return; }
     if (kind === 'mp') { mpScale = dir < 0 ? 0.69 : 1; resize(); return; }
     if (kind === 'bloom') {
       quality.bloomLevels = dir < 0 ? Math.max(1, tier.bloomLevels - 1) : tier.bloomLevels;
@@ -140,15 +142,17 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const now = performance.now(), ladder = isGL() ? LADDER_GL : LADDER_C2D;
     if (mean > target * (isGL() ? 1.2 : 1.14)) {
       calm = 0; if (now < probationUntil) { backoff = Math.min(8, backoff * 2); probationUntil = 0; }
-      if (isGL() && rel > 0.56) { rel = Math.max(0.55, rel * 0.8); resize(); }
+      // xe sheds its doubled rows before any resolution: native-density pixels are the point of the tier
+      if (isGL() && rel > 0.56 && !(xeRows && step === 0)) { rel = Math.max(0.55, rel * 0.8); resize(); }
       else if (now >= cooldownUntil && step < ladder.length) { applyStep(ladder[step], -1); step++; cooldownUntil = now + 2000; frozenUntil = now + 2000; }
     } else if (mean <= target * 1.05) {
       if (probationUntil && now >= probationUntil) { backoff = Math.max(1, backoff / 2); probationUntil = 0; }
       if (probationUntil) return;                                           // one promotion at a time: it must hold its 30 s first
       if (++calm < 10 * backoff || now < cooldownUntil) return;
       calm = 0;
-      if (step > 0) { step--; applyStep(ladder[step], +1); }
+      if (isGL() && step > (xeRows ? 1 : 0)) { step--; applyStep(ladder[step], +1); }   // xe: resolution comes back before the doubled rows
       else if (isGL() && rel < 1) { rel = Math.min(1, rel * 1.15); resize(); }
+      else if (step > 0) { step--; applyStep(ladder[step], +1); }
       else return;
       probationUntil = now + 30000; cooldownUntil = now + 2000; frozenUntil = now + 2000;
     } else calm = 0;

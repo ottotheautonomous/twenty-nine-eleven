@@ -12,7 +12,6 @@ in vec2 vUv;
 uniform sampler2D uOff, uVel, uAux, uHome, uFluid, uTrail;
 uniform mat4 uViewProj, uView;
 uniform vec3 uCamRight, uCamUp, uLightDir;
-uniform vec3 uProbe;
 uniform float uTime, uRatio, uK06;
 uniform float uBuild, uOpen, uFlinch, uTight, uIdle, uPresent;
 uniform vec3 uProbeRaw, uPokeVel, uHandDir;   // raw probe on the centre plane; its world velocity (R/s, |v| <= 4); the view ray through it
@@ -224,7 +223,6 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform1i(s.uHome, bindTex(gl, 3, homeTex)); gl.uniform1i(s.uFluid, bindTex(gl, 4, fluidTex)); gl.uniform1i(s.uTrail, bindTex(gl, 5, trailTex));
     gl.uniformMatrix4fv(s.uViewProj, false, cam.viewProj); gl.uniformMatrix4fv(s.uView, false, cam.view);
     gl.uniform3fv(s.uCamRight, cam.right); gl.uniform3fv(s.uCamUp, cam.up); gl.uniform3fv(s.uLightDir, cam.lightDir);
-    gl.uniform3f(s.uProbe, u.u_probeX.value, u.u_probeY.value, u.u_probeZ.value);
     gl.uniform1f(s.uTime, time % 1000); gl.uniform1f(s.uRatio, ratio); gl.uniform1f(s.uK06, 1 - Math.pow(1 - LAG.particle, ratio));
     gl.uniform1f(s.uBuild, u.u_build.value); gl.uniform1f(s.uOpen, u.u_open.value); gl.uniform1f(s.uFlinch, u.u_flinch.value);
     gl.uniform1f(s.uTight, u.u_tight.value); gl.uniform1f(s.uIdle, u.u_idle.value); gl.uniform1f(s.uPresent, u.u_present.value);
