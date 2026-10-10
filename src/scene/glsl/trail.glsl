@@ -18,6 +18,7 @@ uniform float uGrow;         // max-dilation share this frame: 1 - 0.65^ratio (0
 uniform float uRatio;        // frame time / (1/60 s): the splat scales with it so 120 Hz paints like 60 Hz
 uniform float uTime;
 uniform vec3 uSeal;          // the resync front: centre (UV, y up) and radius (height units); the trail is cleared behind it
+uniform float uHead;         // 1 = the new paint is a leading edge (G/B channels); 0 on a press frame
 uniform float uSealK;        // fraction cleared this frame: 1 - (1 - 0.35 * amp)^ratio; 0 = none
 out vec4 o;
 float capsule(vec2 p, vec2 a, vec2 b) {
@@ -41,6 +42,6 @@ void main() {
   k = uRadius > 1e-5 ? k * k * k * min(1.0, uRatio) : 0.0;
   float v = min((grown + k) * uDecay, 1.0);
   if (uSealK > 0.0) v *= 1.0 - uSealK * (1.0 - smoothstep(uSeal.z - 0.06, uSeal.z, length((vUv - uSeal.xy) * asp)));   // the seal is literal
-  float rim = max(v - prev.r, 0.0);
+  float rim = max(v - prev.r, 0.0) * uHead;
   o = vec4(v, rim, (prev.b + rim) * 0.9, 1.0);
 }

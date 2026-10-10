@@ -130,7 +130,7 @@ void main() {
   vec3 dp = p - uProbeRaw; float along = dot(dp, uHandDir);                  // the hand, measured across the view ray through the pointer
   float hk = 1.0 - smoothstep(0.0, 1.1 * uHand.x, length(dp - uHandDir * along)); hk *= hk * mix(1.0, uHand.y, smoothstep(-0.2, 0.2, along));
   float touch = uWake * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
-  vBoost = 1.0 + 1.5 * (ring + tap + wave) + sentry + touch;
+  vBoost = 1.0 + 1.5 * (ring + tap) + 0.5 * wave + sentry + touch;   // the resync ring crosses the dense limb: x0.5 keeps it to <= 3 bloom blocks (A3)
   vGrow = grow;
   vLight = O.w; vSpeed = V.w; vD2 = A.y; vWarm = A.z; vBuilt = A.w;
 }`;

@@ -135,7 +135,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  let gainS = -1;   // smoothed light per particle: a governor row-shed dims over ~0.6 s instead of popping in one frame
+  let gainS = -1, lightS = -1;   // a row-shed removes half the points in one frame: smooth the TOTAL light (count x gain), so the survivors carry it down over ~0.6 s
   function drawOpts(time) {
     const cam = model.cam, count = rows * tier.side[0];
     const rPx = cam.shellPx.r * hdrScale;
@@ -158,6 +158,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     const cam = model.cam, s = model.state, sealing = s.front >= 0 && s.ampS > 1e-3 && cam.ready;
     gl.uniform3f(p.uSeal, cam.shellPx.x / Math.max(1, cam.width), cam.shellPx.y / Math.max(1, cam.height), s.front * cam.shellPx.r / Math.max(1, cam.height));
     gl.uniform1f(p.uSealK, sealing ? 1 - Math.pow(1 - RESET.seal * s.ampS, ratio) : 0);
+    gl.uniform1f(p.uHead, t.pressDisc ? 0 : 1);   // a press dents the trail but has no leading edge (as the CPU grid): no one-frame flash
     blit(gl, trail.write); trail.swap();
     t.pressDisc = false;
   }
@@ -214,8 +215,9 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
         particles.step(ratio, time, cam, fluid.texture, trail.read.texture, u, rows);
       }
     }
-    const gain = countGain(rows * tier.side[0]);
-    gainS = gainS < 0 || motion === 0 ? gain : gainS + (gain - gainS) * (1 - Math.pow(0.92, ratio));
+    const count = rows * tier.side[0], light = count * countGain(count);
+    lightS = lightS < 0 || motion === 0 ? light : lightS + (light - lightS) * (1 - Math.pow(0.94, ratio));   // 90 % in 37 frames, <= 2 % per frame
+    gainS = lightS / count;
     gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo); gl.viewport(0, 0, W, H);
     gl.clearColor(inkLinear[0], inkLinear[1], inkLinear[2], 0); gl.clear(gl.COLOR_BUFFER_BIT);
     particles.draw(cam, rows * tier.side[0], u, drawOpts(time));
