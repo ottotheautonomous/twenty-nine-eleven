@@ -15,7 +15,9 @@ const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const root = document.documentElement;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const params = new URLSearchParams(location.search);
-const debug = params.has('debug') ? Number(params.get('debug')) || 0 : -1;
+// ?debug (fps readout, window.__tne) exists only in development and in test builds made with VITE_DEBUG_HOOKS=1.
+const debugHooks = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1';
+const debug = debugHooks && params.has('debug') ? Number(params.get('debug')) || 0 : -1;
 const scene = $('.scene');
 const stage = $('.stage');
 const anchor = $('.mark-anchor');
