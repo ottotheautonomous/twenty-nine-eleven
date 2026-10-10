@@ -281,3 +281,49 @@ test('names that could pose as an address or forge a line, and non-plain emails,
     assert.equal(sent.length, 1);
   }
 });
+
+test('the renamed honeypot (hp_ref) is rejected when filled, and older pages sending website still work', async () => {
+  {
+    const { env, sent } = environment();
+    const { website, ...rest } = valid;
+    assert.equal((await worker.fetch(request({ ...rest, hp_ref: 'https://spam.example' }), env)).status, 400);
+    assert.equal(sent.length, 0);
+  }
+  {
+    const { env, sent } = environment();
+    const { website, ...rest } = valid;
+    assert.equal((await worker.fetch(request({ ...rest, hp_ref: '' }), env)).status, 200);
+    assert.equal(sent.length, 1);
+  }
+});
+
+test('Turnstile: enforced only when the secret is configured; verified server-side with action and hostname', async () => {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  const stub = (answer) => { globalThis.fetch = async (url, init) => { calls.push({ url: String(url), body: JSON.parse(init.body) }); if (answer instanceof Error) throw answer; return new Response(JSON.stringify(answer)); }; };
+  try {
+    // no secret: no verification, delivered
+    stub({ success: true });
+    { const { env, sent } = environment(); assert.equal((await worker.fetch(request(), env)).status, 200); assert.equal(sent.length, 1); assert.equal(calls.length, 0); }
+    // secret, missing token: refused without calling Cloudflare
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request(), env)).status, 403); assert.equal(sent.length, 0); assert.equal(calls.length, 0); }
+    // secret, Cloudflare says no
+    stub({ success: false, 'error-codes': ['invalid-input-response'] });
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 403); assert.equal(sent.length, 0); }
+    // secret, wrong action
+    stub({ success: true, action: 'login', hostname: 'ottotheautonomous.github.io' });
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 403); assert.equal(sent.length, 0); }
+    // secret, hostname not allowed
+    stub({ success: true, action: 'contact', hostname: 'evil.example' });
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret', TURNSTILE_HOSTNAMES: 'ottotheautonomous.github.io' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 403); assert.equal(sent.length, 0); }
+    // secret, valid token: delivered; secret and token sent to siteverify, idempotency key = requestId
+    calls.length = 0; stub({ success: true, action: 'contact', hostname: 'ottotheautonomous.github.io' });
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret', TURNSTILE_HOSTNAMES: 'ottotheautonomous.github.io' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 200); assert.equal(sent.length, 1);
+      assert.match(calls[0].url, /challenges\.cloudflare\.com\/turnstile\/v0\/siteverify$/); assert.equal(calls[0].body.secret, 'secret'); assert.equal(calls[0].body.response, 'tok'); assert.equal(calls[0].body.idempotency_key, valid.requestId); }
+    // Cloudflare unreachable: 503, nothing sent
+    stub(new TypeError('network'));
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'tok' }), env)).status, 503); assert.equal(sent.length, 0); }
+    // oversized token rejected as invalid input
+    { const { env, sent } = environment({ TURNSTILE_SECRET: 'secret' }); assert.equal((await worker.fetch(request({ ...valid, turnstile: 'x'.repeat(2049) }), env)).status, 400); assert.equal(sent.length, 0); }
+  } finally { globalThis.fetch = realFetch; }
+});

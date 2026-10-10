@@ -7,6 +7,7 @@ import { CLASS, ROW_READING } from './scene/shape.js';
 import { RESET } from './scene/constants.js';
 import { decode, stopDecode } from './scene/decode.js';
 import { wrapWords } from './verse-light.js';
+import { turnstileEnabled, prepareTurnstile, turnstileToken } from './turnstile.js';
 
 // Never run inside someone else's frame (clickjacking): a meta CSP cannot set frame-ancestors on GitHub Pages.
 if (window.top !== window.self) document.documentElement.style.display = 'none';
@@ -474,7 +475,7 @@ const dialogs = {
     ],
     closeScenery: () => animate(uniforms, { u_open: 0, u_dolly: 0, u_dim: 0 }, { duration: .6, ease }),
     stillOpen: { u_dolly: 1, u_dim: 1, u_open: 1 }, stillClosed: { u_dolly: 0, u_dim: 0, u_open: 0 },
-    onOpen() {}, reveal: null, settle: null, conceal: null,
+    onOpen() { prepareTurnstile($('#contact-turnstile')); }, reveal: null, settle: null, conceal: null,   // the bot check loads with the panel, never with the page
     afterClose() {
       if (still()) return;
       const s = model.state;
@@ -617,7 +618,8 @@ const fields = ['name', 'email', 'message'].map(name => form.elements.namedItem(
 function validate(field) {
   const value = field.value.trim(); let message = '';
   if (!value) message = field.name === 'message' ? 'Please tell us a little about your enquiry.' : `Please enter your ${field.name === 'email' ? 'email address' : 'name'}.`;
-  else if (field.name === 'email' && (field.validity.typeMismatch || !/^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/.test(value))) message = 'Please enter a valid email address.';
+  else if (field.name === 'name' && /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u.test(value)) message = 'Please remove quotes, angle brackets or hidden characters from your name.';
+  else if (field.name === 'email' && (field.validity.typeMismatch || !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(value))) message = 'Please enter a valid email address.';
   else if (field.name === 'message' && value.length < 10) message = 'A little more detail, please — at least 10 characters.';
   $(`#${field.name}-error`).textContent = message; field.setAttribute('aria-invalid', String(Boolean(message))); return !message;
 }
@@ -629,9 +631,10 @@ form.addEventListener('submit', async event => {
   event.preventDefault(); if (submitting) return;
   const validity = fields.map(validate); const invalid = validity.indexOf(false);
   if (invalid !== -1) { fields[invalid].focus(); return; }
-  const payload = { name: fields[0].value.trim(), email: fields[1].value.trim(), message: fields[2].value.trim(), website: form.elements.website.value, requestId };
+  const payload = { name: fields[0].value.trim(), email: fields[1].value.trim(), message: fields[2].value.trim(), hp_ref: form.elements.hp_ref.value, requestId };
   submitting = true; fieldset.disabled = true; textFeedback.setText(buttonLabel, 'Sending…'); status.textContent = ''; status.classList.remove('is-error'); form.setAttribute('aria-busy', 'true');
   try {
+    if (turnstileEnabled) payload.turnstile = await turnstileToken();
     const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15000), credentials: 'omit' });
     const result = await response.json().catch(() => null);
     if (!response.ok || result?.ok !== true) {

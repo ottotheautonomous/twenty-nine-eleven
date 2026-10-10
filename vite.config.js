@@ -7,6 +7,7 @@ import { defineConfig, loadEnv } from 'vite';
 function securityHeaders(mode) {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const contact = new URL(env.VITE_CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact').origin;
+  const turnstile = env.VITE_TURNSTILE_SITE_KEY ? ' https://challenges.cloudflare.com' : '';   // Cloudflare's bot check: its script and frame, only when configured
   return {
     name: 'security-headers',
     apply: 'build',
@@ -15,7 +16,7 @@ function securityHeaders(mode) {
         .map(([, body]) => `'sha256-${createHash('sha256').update(body).digest('base64')}'`);
       const csp = [
         "default-src 'none'",
-        `script-src 'self' ${hashes.join(' ')}`,
+        `script-src 'self' ${hashes.join(' ')}${turnstile}`,
         "style-src 'self'",
         "img-src 'self' data:",
         "font-src 'self'",
@@ -23,6 +24,7 @@ function securityHeaders(mode) {
         `form-action ${contact}`,
         "base-uri 'none'",
         "object-src 'none'",
+        ...(turnstile ? [`frame-src${turnstile}`] : []),
         "manifest-src 'self'",
       ].join('; ');
       return html.replace('<meta charset="UTF-8" />',

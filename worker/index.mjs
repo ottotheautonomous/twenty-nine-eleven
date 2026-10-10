@@ -85,12 +85,13 @@ async function readJson(request) {
 
 function validate(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const { name, email, message, website = '', requestId } = payload;
-  if ([name, email, message, website, requestId].some((value) => typeof value !== 'string')) {
+  // The hidden field is hp_ref (a neutral name password managers do not autofill); "website" is still read from older pages.
+  const { name, email, message, hp_ref: trap = payload.website ?? '', requestId, turnstile = '' } = payload;
+  if ([name, email, message, trap, requestId, turnstile].some((value) => typeof value !== 'string')) {
     return null;
   }
   // A populated hidden field is rejected without sending mail or claiming delivery.
-  if (website.trim()) return null;
+  if (trap.trim() || turnstile.length > 2048) return null;
 
   const cleanName = name.trim();
   const cleanEmail = email.trim();
@@ -104,7 +105,23 @@ function validate(payload) {
   ) {
     return null;
   }
-  return { name: cleanName, email: cleanEmail, message: cleanMessage, requestId };
+  return { name: cleanName, email: cleanEmail, message: cleanMessage, requestId, turnstile };
+}
+
+// Cloudflare Turnstile, enforced whenever TURNSTILE_SECRET is configured (wrangler secret put TURNSTILE_SECRET). The token is
+// single-use and verified server-side; the action must be "contact" and, if TURNSTILE_HOSTNAMES is set, the hostname must match.
+async function verifyTurnstile(env, token, ip, requestId) {
+  if (!token) return false;
+  const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ secret: env.TURNSTILE_SECRET, response: token, remoteip: ip || undefined, idempotency_key: requestId }),
+    signal: AbortSignal.timeout(8000),
+  }).then((r) => r.json());
+  if (result?.success !== true) return false;
+  if (result.action && result.action !== 'contact') return false;
+  const hosts = (env.TURNSTILE_HOSTNAMES || '').split(',').map((h) => h.trim()).filter(Boolean);
+  return !hosts.length || hosts.includes(result.hostname);
 }
 
 export default {
@@ -177,6 +194,17 @@ export default {
     }
     if (!payload) {
       return response(400, { error: 'Please check your contact details and message.' }, origin);
+    }
+    if (env.TURNSTILE_SECRET) {
+      let human = false;
+      try {
+        human = await verifyTurnstile(env, payload.turnstile, request.headers.get('cf-connecting-ip'), payload.requestId);
+      } catch {
+        return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin);
+      }
+      if (!human) {
+        return response(403, { error: 'We could not verify this browser. Please try again. Your message is still here.' }, origin);
+      }
     }
 
     try {
