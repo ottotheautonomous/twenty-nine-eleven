@@ -8,12 +8,14 @@ import { watchContext } from './gl.js';
 import { LATTICE } from './constants.js';
 
 // Tier table (start values). side = state texture size allocated once; rows = active prefix (no reallocation).
+// Backing caps are high so hi-DPI screens get native-resolution particles (low caps upscale into blur); the
+// governor lowers the scale, then quality, when frames run long.
 export const TIERS = {
-  xe: { name: 'xe', mobile: false, state32: true, side: [512, 512], rowsStart: 256, rowsMax: 256, fluidRes: 128, jacobi: 8, bloomLevels: 6, hdrScale: 1, dprCap: 1.25, mpCap: 2.0, fps: 60 },
-  uhd: { name: 'uhd', mobile: false, state32: false, side: [512, 256], rowsStart: 128, rowsMax: 256, fluidRes: 96, jacobi: 6, bloomLevels: 5, hdrScale: 1, dprCap: 1.0, mpCap: 1.0, fps: 60 },
-  android: { name: 'android', mobile: true, state32: false, side: [256, 256], rowsStart: 128, rowsMax: 256, fluidRes: 64, jacobi: 4, bloomLevels: 4, hdrScale: 0.75, dprCap: 1.5, mpCap: 0.75, fps: 30 },
-  iphone: { name: 'iphone', mobile: true, state32: false, side: [512, 256], rowsStart: 128, rowsMax: 256, fluidRes: 128, jacobi: 8, bloomLevels: 5, hdrScale: 1, dprCap: 1.75, mpCap: 1.1, fps: 60 },
-  c2d: { name: 'c2d', mobile: false, sprites: 2000, dprCap: 1.0, mpCap: 1.3, fps: 30 },
+  xe: { name: 'xe', mobile: false, state32: true, side: [512, 512], rowsStart: 256, rowsMax: 256, fluidRes: 128, jacobi: 8, bloomLevels: 6, hdrScale: 1, dprCap: 2.0, mpCap: 3.5, fps: 60 },
+  uhd: { name: 'uhd', mobile: false, state32: false, side: [512, 256], rowsStart: 128, rowsMax: 256, fluidRes: 96, jacobi: 6, bloomLevels: 5, hdrScale: 1, dprCap: 1.5, mpCap: 1.6, fps: 60 },
+  android: { name: 'android', mobile: true, state32: false, side: [256, 256], rowsStart: 128, rowsMax: 256, fluidRes: 64, jacobi: 4, bloomLevels: 4, hdrScale: 0.75, dprCap: 2.0, mpCap: 1.0, fps: 30 },
+  iphone: { name: 'iphone', mobile: true, state32: false, side: [512, 256], rowsStart: 128, rowsMax: 256, fluidRes: 128, jacobi: 8, bloomLevels: 5, hdrScale: 1, dprCap: 2.0, mpCap: 1.6, fps: 60 },
+  c2d: { name: 'c2d', mobile: false, sprites: 2000, dprCap: 2.0, mpCap: 2.6, fps: 30 },
 };
 
 function pickTier(probe, override, force) {
@@ -71,7 +73,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
 
   function budget() {
     const w = Math.max(1, canvas.clientWidth || innerWidth), h = Math.max(1, canvas.clientHeight || innerHeight);
-    const mp = (coarse.matches && renderer?.type === 'canvas2d' ? 0.9 : (tier.mpCap || 1.3)) * mpScale * 1e6;
+    const mp = (coarse.matches && renderer?.type === 'canvas2d' ? 1.3 : (tier.mpCap || 1.3)) * mpScale * 1e6;
     return { w, h, max: Math.sqrt(mp / (w * h)) };
   }
   const isGL = () => renderer?.type === 'webgl2';
