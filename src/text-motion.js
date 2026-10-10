@@ -47,7 +47,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     active ? state.owners.add(owner) : state.owners.delete(owner);
     state.controls.forEach(control => control.stop());
     const lit = state.owners.size > 0;
-    const values = { scale: canAnimate() ? (lit ? 1.35 : 1) : 1, color: lit ? '#ffe3b0' : state.color, opacity: lit ? 1 : .65 };
+    const values = { scale: 1, color: lit ? '#ffe3b0' : state.color, opacity: lit ? 1 : .65 };   // the dots brighten; nothing changes size
     state.controls = [immediateOnly || !canAnimate() ? immediate(separator, values) : animate(separator, values, { duration: .2, ease: 'easeOut' })];
   }
   function visibleLabels(record) { return record.labels.filter(label => label.getClientRects().length); }
@@ -58,15 +58,13 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     record.element.dataset.textActive = String(active);
     const labels = visibleLabels(record);
     const chars = labels.flatMap(label => [...label.querySelectorAll('.motion-char')]);
-    const scale = active && spatial ? (compact() ? 1.025 : 1.04) : 1;
+    // The text never changes size: the response is the letter wave, the warm light and the underline.
     const lift = active && spatial ? (compact() ? -1.8 : -2.6) : 0;
-    const labelValues = { scale };
     if (spatial) {
       for (const hidden of record.labels.filter(label => !labels.includes(label))) {
         record.controls.push(immediate(hidden, { scale: 1 }));
         hidden.querySelectorAll('.motion-char').forEach(char => record.controls.push(immediate(char, { y: 0, color: record.colors.get(hidden) })));
       }
-      record.controls.push(animate(labels, labelValues, spring));
       for (const label of labels) {
         const letters = [...label.querySelectorAll('.motion-char')];
         record.controls.push(animate(letters, { y: lift, color: active ? '#ffe9c4' : record.colors.get(label) }, {
