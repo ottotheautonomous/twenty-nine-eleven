@@ -15,6 +15,7 @@ const inOut3 = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2
 const GRID_GROW = LAG.trailGrow * 0.16;
 export function createTrailGrid(w = 48, h = 27) {
   let v = new Float32Array(w * h), tmp = new Float32Array(w * h);
+  const rim = new Float32Array(w * h), head = new Float32Array(w * h);   // leading edge this tick; its x0.9-per-tick smoothed head (as trail.glsl G/B)
   function capsule(px, py, ax, ay, bx, by) {
     const pax = px - ax, pay = py - ay, bax = bx - ax, bay = by - ay;
     const t = clamp((pax * bax + pay * bay) / Math.max(bax * bax + bay * bay, 1e-8));
@@ -31,7 +32,9 @@ export function createTrailGrid(w = 48, h = 27) {
   return {
     w, h,
     get data() { return v; },
-    clear() { v.fill(0); },
+    clear() { v.fill(0); rim.fill(0); head.fill(0); },
+    // the bright, short-lived head of a tear (igloo's front channel): gone in ~20 ticks
+    front(u, vv) { const i = clamp(Math.floor(vv * h), 0, h - 1) * w + clamp(Math.floor(u * w), 0, w - 1); return Math.min(1, rim[i] * 2.5 + head[i] * 0.25); },
     step(trail, ratio, aspect) {
       const decay = friction(LAG.trailDecay, ratio);
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -44,7 +47,8 @@ export function createTrailGrid(w = 48, h = 27) {
       const cell = 1 / h;
       const amp = trail.radius > 1e-5 ? Math.min(1, trail.radius / (0.6 * cell)) : 0;
       if (amp > 0) splat(trail.ax, trail.ay, trail.bx, trail.by, Math.max(trail.radius, cell), aspect, tmp, amp);
-      for (let i = 0; i < tmp.length; i++) tmp[i] = Math.min(tmp[i] * decay, 1);
+      const keep = Math.pow(0.9, ratio);
+      for (let i = 0; i < tmp.length; i++) { tmp[i] = Math.min(tmp[i] * decay, 1); rim[i] = Math.max(tmp[i] - v[i], 0); head[i] = (head[i] + rim[i]) * keep; }
       const t = v; v = tmp; tmp = t;
     },
     seal(cx, cy, rPx, width, height, k) {   // the resync front clears the grid behind it (cell centres, backing px, y up)
@@ -105,7 +109,7 @@ export function createModel(shape, uniforms) {
     trail: { ax: 0.5, ay: 0.5, bx: 0.5, by: 0.5, radius: 0, pressDisc: false },
     forcedNode: -1, tapNodes: [], tapUntil: 0, aspect: 16 / 9,
     present: 0, crossedAt: -1e9, entered: false,
-    probeVel: [0, 0, 0], lastProbeRaw: [0, 0, 0], poke: 0, probeJump: false, handDir: [0, 0, -1],
+    probeVel: [0, 0, 0], lastProbeRaw: [0, 0, 0], poke: 0, wake: 0, probeJump: false, handDir: [0, 0, -1],
     // the integrity ledger and the reset (see INTEGRITY / RESET)
     quietSince: -1e9, damage: 0, deficit: 0, resetting: false, released: false, rollUntil: 0, resetT: -1, front: -10, resetAmp: 0, ampS: 0,
   };
@@ -118,7 +122,7 @@ export function createModel(shape, uniforms) {
     u.u_probeRX.value = s.probeRaw[0]; u.u_probeRY.value = s.probeRaw[1]; u.u_probeRZ.value = s.probeRaw[2];
     u.u_pokeX.value = s.probeVel[0]; u.u_pokeY.value = s.probeVel[1]; u.u_pokeZ.value = s.probeVel[2]; u.u_poke.value = s.poke;
     u.u_handDX.value = s.handDir[0]; u.u_handDY.value = s.handDir[1]; u.u_handDZ.value = s.handDir[2];
-    u.u_resetFront.value = s.front; u.u_resetAmp.value = s.ampS;
+    u.u_resetFront.value = s.front; u.u_resetAmp.value = s.ampS; u.u_wake.value = s.wake;
   }
 
   function step(dtMs, view) {
@@ -157,6 +161,7 @@ export function createModel(shape, uniforms) {
     const pvl = Math.hypot(s.probeVel[0], s.probeVel[1], s.probeVel[2]);
     if (pvl > 4) for (let i = 0; i < 3; i++) s.probeVel[i] *= 4 / pvl;
     s.poke = Math.max(s.poke * friction(LAG.poke, ratio), Math.min(1, rawSpeed / 2.0)) * motion * (s.simulate ? 1 : 0);   // no shove while the cage builds
+    s.wake = Math.max(s.wake * friction(LAG.wake, ratio), s.poke) * motion;   // the light's slower tail: lit particles stay lit on their way home
     // 3. orbit through two cascaded lerps; half speed while losing the visitor
     const aimed = (s.inScene || s.keyboard) && motion;
     const aim = aimed ? [pf.state.sx * ORBIT.yaw, -pf.state.sy * ORBIT.pitch] : [0, 0];
@@ -284,7 +289,7 @@ export function createModel(shape, uniforms) {
     s.quietSince = -1e9; s.damage = 0; s.deficit = 0; s.resetting = false; s.released = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.ampS = 0;
     s.probeS[0] = s.probeS[1] = s.probeS[2] = 0; s.orbitNorm[0] = s.orbitNorm[1] = 0;
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;
-    s.poke = 0; s.probeJump = true; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
+    s.poke = 0; s.wake = 0; s.probeJump = true; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
     s.handDir[0] = 0; s.handDir[1] = 0; s.handDir[2] = -1;
     s.tier0.on = false; s.tier0.since = -1;
     trailGrid.clear();

@@ -12,7 +12,7 @@ export const NODES = 64;
 // face under the hand feels it. radius in R (0.3 = 40 px at R 135); back: the far hemisphere's share (it stays coherent
 // behind the scatter); spread: per-particle gain 1 +- spread, so neighbours part as sparks instead of the tube bending.
 export const HAND = { radius: 0.3, back: 0.35, spread: 0.6, shove: 6e-3, drag: 1e-3 };
-export const LAG = { poke: 0.85, pointer: 0.05, orbit: 0.05, particle: 0.10, velGain: 0.09, velFriction: 0.98, trailDecay: 0.985, trailGrow: 0.35, trailRadius: 0.05 };
+export const LAG = { poke: 0.85, wake: 0.955, pointer: 0.05, orbit: 0.05, particle: 0.10, velGain: 0.09, velFriction: 0.98, trailDecay: 0.985, trailGrow: 0.35, trailRadius: 0.05 };
 export const EXPOSURE = { gain: 1.8, velPenalty: 0.6, decay: 0.992, show: 0.35, hide: 0.315 };
 export const ORBIT = { yaw: 0.11, pitch: 0.04, shake: 0.008, idle: 0.026 };   // radians
 export const EMBER = { coreR: 0.045, haloR: 0.42, hdr: 3.0, halo: 0.25, offset: 0.08 };   // in R

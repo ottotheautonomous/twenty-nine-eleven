@@ -101,7 +101,7 @@ uniform vec3 uRing;          // (longitude, phase 0..1, amplitude)
 uniform vec4 uTap;           // (x, y, z, t); t outside (0,1) = none
 uniform float uSentry;       // idle sentry band phase 0..1; 0 = none
 uniform vec3 uKey;           // key light direction (sentry band origin)
-uniform vec3 uProbeRaw, uHandDir, uHand; uniform float uPoke;   // the hand: instant light where it moves
+uniform vec3 uProbeRaw, uHandDir, uHand; uniform float uWake;   // the hand: instant light where it moves, ~0.85 s tail
 uniform vec3 uReset;         // the resync front (radius R, amp, band sigma): the tap's own light, as a ring leaving the ember
 out float vLight, vSpeed, vFade, vD2, vWarm, vBuilt, vBoost, vGrow;
 void main() {
@@ -130,7 +130,7 @@ void main() {
   vFade = clamp(size * size, 0.0, 1.0) * flick;
   vec3 dp = p - uProbeRaw; float along = dot(dp, uHandDir);                  // the hand, measured across the view ray through the pointer
   float hk = 1.0 - smoothstep(0.0, 1.1 * uHand.x, length(dp - uHandDir * along)); hk *= hk * mix(1.0, uHand.y, smoothstep(-0.2, 0.2, along));
-  float touch = uPoke * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
+  float touch = uWake * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
   vBoost = 1.0 + 1.5 * (ring + tap + wave) + sentry + touch;
   vGrow = grow;
   vLight = O.w; vSpeed = V.w; vD2 = A.y; vWarm = A.z; vBuilt = A.w;
@@ -153,8 +153,9 @@ void main() {
   vec3 col = mix(uColDark, uColLight, lit);
   col = mix(col, uColFast, smoothstep(uFastRange.x, uFastRange.y, vSpeed));
   col = mix(col, uEmberCol, vWarm * vWarm * uEmberLevel * 0.25);
-  vec2 tr = texture(uTrail, gl_FragCoord.xy * uInvRes).rg;
-  col += uColFast * (tr.g * 2.5 + tr.r * 0.3);                        // the breach rim brightens the lattice; it does not scratch the ember
+  vec3 tr = texture(uTrail, gl_FragCoord.xy * uInvRes).rgb;
+  float front = min(1.0, tr.g * 2.5 + tr.b * 0.25);                   // igloo's front channel: a bright head, x0.9 per frame, gone in ~20 frames
+  col += uColFast * (front + tr.r * 0.3);                             // the breach rim brightens the lattice; it does not scratch the ember
   col += uColFast * vD2 * vD2 * 0.8;
   float a = (1.0 - 0.35 * smoothstep(uBlurRange.x, uBlurRange.y, vSpeed)) * vFade * vBuilt;   // moved particles stay visible
   a *= 1.0 - smoothstep(0.75, 1.0, r2);
@@ -254,7 +255,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3f(r.uRing, u.u_ringLon.value, u.u_ringPhase.value, u.u_ringAmp.value);
     gl.uniform4f(r.uTap, u.u_tapX.value, u.u_tapY.value, u.u_tapZ.value, u.u_tapT.value);
     gl.uniform1f(r.uSentry, u.u_sentry.value); gl.uniform3fv(r.uKey, cam.lightDir);
-    gl.uniform3f(r.uProbeRaw, u.u_probeRX.value, u.u_probeRY.value, u.u_probeRZ.value); gl.uniform1f(r.uPoke, u.u_poke.value);
+    gl.uniform3f(r.uProbeRaw, u.u_probeRX.value, u.u_probeRY.value, u.u_probeRZ.value); gl.uniform1f(r.uWake, u.u_wake.value);
     gl.uniform3f(r.uHandDir, u.u_handDX.value, u.u_handDY.value, u.u_handDZ.value); gl.uniform3f(r.uHand, HAND.radius, HAND.back, HAND.spread);
     gl.uniform3f(r.uReset, u.u_resetFront.value, u.u_resetAmp.value, RESET.band);
     gl.uniform3fv(r.uColDark, opts.colDark); gl.uniform3fv(r.uColLight, opts.colLight); gl.uniform3fv(r.uColFast, opts.colFast); gl.uniform3fv(r.uEmberCol, opts.ember);

@@ -163,6 +163,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const diff = Math.max(((hx * L[0] + hy * L[1] + hz * L[2]) / nl + 0.25) / 1.25, 0);
       const speed = Math.hypot(vx[i], vy[i], vz[i]);
       const tr2 = sim ? model.trailGrid.at(tmp[0] / W, tmp[1] / H) : 0;
+      const head = sim ? model.trailGrid.front(tmp[0] / W, tmp[1] / H) : 0;      // the tear's bright head (as RENDER_FS)
       // ring ripple, tap wave, sentry band, flicker (same formulas as RENDER_VS, scalar)
       let ring = 0;
       if (ringAmp > 0.001) {
@@ -180,9 +181,9 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const lit = 0.25 + 0.75 * diff;
       let tn = lit < 0.35 ? 0 : lit < 0.62 ? 1 : 2;
       let touch = 0;
-      if (poke > 1e-3) {
+      if (s.wake > 1e-3) {
         const dx_ = px - PR[0], dy_ = py - PR[1], dz_ = pz - PR[2], al = dx_ * HD[0] + dy_ * HD[1] + dz_ * HD[2];
-        let hk2 = 1 - smoothstep(0, 1.1 * HAND.radius, Math.hypot(dx_ - HD[0] * al, dy_ - HD[1] * al, dz_ - HD[2] * al)); hk2 *= hk2 * handW(al); touch = poke * hk2;
+        let hk2 = 1 - smoothstep(0, 1.1 * HAND.radius, Math.hypot(dx_ - HD[0] * al, dy_ - HD[1] * al, dz_ - HD[2] * al)); hk2 *= hk2 * handW(al); touch = s.wake * hk2;
       }
       if (speed > 0.004 || tr2 > 0.25 || d2[i] > 0.45 || touch > 0.3 || wave > 0.3) tn = 3;
       // perspective size: nearer sprites larger; energy-conserving intensity
@@ -193,7 +194,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
-      inten[i] = 0.95 * dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch);
+      inten[i] = 0.95 * dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch) * (1 + 0.5 * head);
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----

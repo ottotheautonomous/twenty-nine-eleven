@@ -13,7 +13,8 @@ export const uniforms = {
   u_probeRX: { value: 0 }, u_probeRY: { value: 0 }, u_probeRZ: { value: 0 },   // the hand: raw probe, its world velocity, and a poke
   u_pokeX: { value: 0 }, u_pokeY: { value: 0 }, u_pokeZ: { value: 0 }, u_poke: { value: 0 },
   u_handDX: { value: 0 }, u_handDY: { value: 0 }, u_handDZ: { value: -1 },     // unit view ray through the raw probe (eye -> probe)
-  u_resetFront: { value: -10 }, u_resetAmp: { value: 0 },                      // the resync front: radius (R; < 0 = none) and eased amplitude
+  u_resetFront: { value: -10 }, u_resetAmp: { value: 0 },
+  u_wake: { value: 0 },                                                        // the hand's light: instant on, ~0.85 s tail                      // the resync front: radius (R; < 0 = none) and eased amplitude
   // bound values
   u_engage: { value: 0 }, u_idle: { value: 0 },
   // entrance
