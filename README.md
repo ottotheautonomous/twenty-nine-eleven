@@ -2,7 +2,7 @@
 
 A centered single page for security and bespoke technology. **Sentinel**: a geodesic perimeter of cold silver light, ten great circles woven into a cage with real gaps, held around one small warm ember. The cage is the perimeter; the ember is what is kept. The visitor's cursor is the probe: where it rests, the lattice notices it; where it sweeps, the lattice tears open in fluid streams and the ember's warmth leaks through the breach; where it settles, hairlines lock onto nearby nodes and print what a penetration tester would read there (documentation-range addresses only). Then the perimeter heals, the readouts retract, and the corner instrument climbs back to `INTEGRITY 0.998`. Once per visit, after two tears, one reading turns red: a finding on a test range.
 
-Every scene input is a [Motion](https://motion.dev/) value and the render loop runs on Motion's frame scheduler. The capability rows are plain text with per-letter Motion feedback that the scene answers. No header or footer. The closing colophon, “Plans for hope and a future”, references [Jeremiah 29:11](https://www.biblegateway.com/passage/?search=Jeremiah+29%3A11&version=NIV); the ember exists before the walls and every tear heals.
+Every scene input is a [Motion](https://motion.dev/) value and the render loop runs on Motion's frame scheduler. The capability rows are plain text with per-letter light that the scene answers; text never moves. No header or footer. The closing colophon, “Plans for hope and a future”, references [Jeremiah 29:11](https://biblehub.com/bsb/jeremiah/29.htm); clicking it opens the full verse (Berean Standard Bible, public domain) in a panel that springs from the ember. The ember exists before the walls and every tear heals.
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
@@ -44,7 +44,8 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 
 - `index.html`: company copy, services, form labels, the corner instrument and the static poster.
 - `src/style.css`: composition, type scale, colour tokens, readouts and fallback states.
-- `src/main.js`: entrance, pointer/touch/keyboard/idle, press and tap, rows feeding the scene, pause, the modal ("authorize"), validation and submission.
+- `src/main.js`: entrance, pointer/touch/keyboard/idle, press and tap, rows feeding the scene, pause, one dialog controller for the contact ("authorize") and verse ("purpose") panels, validation and submission.
+- `src/verse-light.js`: wraps the verse into words so light can read across it.
 - `src/scene-state.js`: the shader uniforms and the Motion values bound to them.
 - `src/scene/constants.js`: every tuning constant (lag chain, exposure, orbit, ember, integrity, colours).
 - `src/scene/shape.js`: the lattice (R2 order), the 64 nodes and their security readouts.

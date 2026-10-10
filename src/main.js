@@ -4,6 +4,8 @@ import { createSentinel } from './scene/sentinel.js';
 import { createTextMotion } from './text-motion.js';
 import { uniforms, engage, idle, settled } from './scene-state.js';
 import { CLASS, ROW_READING } from './scene/shape.js';
+import { decode, stopDecode } from './scene/decode.js';
+import { wrapWords } from './verse-light.js';
 
 const $ = selector => document.querySelector(selector);
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -20,7 +22,11 @@ const canvas = $('#world');
 const instrument = $('.instrument');
 const trigger = $('#open-contact');
 const dialog = $('#contact-dialog');
-const surface = $('.dialog-surface');
+const surface = $('#contact-dialog .dialog-surface');
+const verseButton = $('#open-verse');
+const verseDialog = $('#verse-dialog');
+const verseSurface = $('#verse-dialog .dialog-surface');
+const verseRule = $('.verse-rule');
 const veil = $('.veil');
 const motionToggle = $('.motion-toggle');
 const form = $('#contact-form');
@@ -51,7 +57,10 @@ let sentryTimer = 0;
 let integrityLive = reducedMotion.matches;
 let rowIntent = 0;
 let lastDrawnEngage = 0;
-const still = () => reducedMotion.matches || paused || params.has('still');
+let current = null;            // the open dialog's descriptor (one modal at a time)
+let verseActive = false;
+let verseHover = [];
+const still =() => reducedMotion.matches || paused || params.has('still');
 
 // Lift the CSS entrance gate without a flash: targets start transparent inline.
 const entering = [canvas, instrument, ...words, ...document.querySelectorAll('[data-enter], .services li'), motionToggle];
@@ -66,7 +75,7 @@ model.state.entered = entered;
 const labels = sentinel.labels;
 if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-button, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
   canAnimate: () => !still(),
   onActive: rowActive,
 });
@@ -79,12 +88,13 @@ const nameX = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
 const nameY = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
 styleEffect(wordmark, { x: nameX, y: nameY, '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
+styleEffect(verseSurface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 model.state.onFrame = () => {
   nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3);
   if (integrityLive) labels.setIntegrity(model.state.integrity);
 };
 model.state.onGreet = lon => { if (!still()) { ring(lon); boost('u_boostGreet', .15, .6); } };
-model.state.onState = word => labels.setState(word);
+model.state.onState = word => { if (current?.name !== 'verse') labels.setState(word); };   // the verse holds PURPOSE until it closes
 model.state.onTier0 = on => { animate(uniforms, { u_tier0: on ? 1 : 0 }, { duration: on ? .5 : .4, ease }); labels.showTier0(on); };
 model.state.onFinding = node => labels.setFindings(node);
 // When the loop is idle (paused, reduced motion, modal open) engagement still redraws the composed frame.
@@ -139,7 +149,7 @@ function applyMotionPolicy() {
   if (still()) {
     labels.hideAll(); stopSentry();
     const t0 = model.state.tier0; if (t0.on) { t0.on = false; t0.since = -1; }
-    animate(uniforms, { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();
+    animate(uniforms, current?.name === 'verse' ? { u_tier0: 0, u_classAmp: 0 } : { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();   // the open verse owns warm/tight
     model.rowHover(-1); rowIntent = 0;
   }
   updateAmbient(); refreshIntent(); resetServiceMotion(); sentinel.drawOnce();
@@ -209,7 +219,7 @@ const toNdc = (x, y) => [clamp(x / innerWidth) * 2 - 1, 1 - clamp(y / innerHeigh
 function visitPoint(clientX, clientY, input = 'mouse', target = null) {
   const instant = still();
   const set = (value, next) => instant ? value.jump(next) : value.set(next);
-  const lighting = (modalState === 'closed' ? wordmark : dialog).getBoundingClientRect();
+  const lighting = (current?.dialog ?? wordmark).getBoundingClientRect();
   set(textLightX, `${clamp((clientX - lighting.left) / Math.max(1, lighting.width)) * 100}%`);
   set(textLightY, `${clamp((clientY - lighting.top) / Math.max(1, lighting.height)) * 100}%`);
   const shell = anchor.getBoundingClientRect();
@@ -261,9 +271,6 @@ scene.addEventListener('pointerup', event => {
 function leaveScene() { pointerIntent = 0; setPointerElement(null); refreshIntent(); model.leave(); }
 scene.addEventListener('pointerleave', leaveScene);
 scene.addEventListener('pointercancel', leaveScene);
-dialog.addEventListener('pointermove', event => {
-  if (dialog.open) visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse');
-}, { passive: true });
 // Motion keeps one value per animated uniform; a direct write to .value would be invisible to it, so every
 // gesture starts from explicit keyframes (a bare target would animate from Motion's last value, not the peak).
 function boost(key, peak, seconds) { animate(uniforms, { [key]: [peak, 0] }, { duration: seconds, ease: [0.2, 0.8, 0.2, 1] }); }
@@ -275,7 +282,21 @@ function ring(lon) {
 
 // The rows are plain text, but their hover is felt in the scene: a dotted packet runs the meridian above the
 // word; a row-1 word lights its asset class and prints its own reading; a row-2 word tightens the lattice.
+// The verse is a control, but it answers in light alone: its hairline warms and the ember warms behind it,
+// a preview of where the verse panel will come from.
+function highlightVerse(state) {                     // 'rest' | 'lit' | 'press'
+  verseHover.forEach(control => control.stop());
+  const backgroundColor = { rest: '#3A4553', lit: '#FFE3B0', press: '#FFEBD0' }[state];
+  verseHover = [still() ? setImmediateMotion(verseRule, { backgroundColor })
+    : animate(verseRule, { backgroundColor }, { duration: state === 'press' ? .08 : .24, ease: 'easeOut' })];
+}
+function resetVerseFeedback() { highlightVerse(verseActive ? 'lit' : 'rest'); }
 function rowActive(element, active) {
+  if (element.matches('.verse-button')) {
+    verseActive = active; highlightVerse(active ? 'lit' : 'rest');
+    if (!still() && entered && (active ? modalState === 'closed' : current?.name !== 'verse')) animate(uniforms, { u_warm: active ? .4 : 0 }, { duration: active ? .5 : .8, ease });
+    return;
+  }
   if (!element.matches('.service')) return;
   if (!active && still()) {   // always tear down; while still, set now and redraw instead of tweening
     animate(uniforms, element.dataset.row === '1' ? { u_classAmp: 0 } : { u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();
@@ -293,18 +314,19 @@ function rowActive(element, active) {
     if (active) { uniforms.u_classSel.value = c; animate(uniforms, { u_classAmp: 1 }, { duration: .2 }); model.rowHover(c, lon, ROW_READING[c]); rowIntent = .5; }
     else { animate(uniforms, { u_classAmp: 0 }, { duration: .4 }); model.rowHover(-1); rowIntent = 0; }
     refreshIntent();
-  } else {
+  } else if (current?.name !== 'verse') {             // the open verse owns u_warm/u_tight; its closeScenery returns them to 0
     animate(uniforms, { u_tight: active ? 1 : 0, u_warm: active ? 1 : 0 }, { duration: active ? .3 : .8, ease });
   }
 }
 
+const inDialog = element => [dialog, verseDialog].some(d => d.contains(element));
 document.addEventListener('focusin', event => {
-  if (!scene.contains(event.target) && !dialog.contains(event.target)) return;
+  if (!scene.contains(event.target) && !inDialog(event.target)) return;
   const target = event.target.closest('[data-react]');
-  focusIntent = dialog.contains(event.target) ? .9 : targetIntent(target);
+  focusIntent = inDialog(event.target) ? .9 : targetIntent(target);
   const rect = event.target.getBoundingClientRect();
   visitPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, 'keyboard', target);
-  if (!dialog.contains(event.target) && !still()) {
+  if (!inDialog(event.target) && !still()) {
     const [nx, ny] = toNdc(rect.left + rect.width / 2, rect.top + rect.height / 2);
     model.state.keyboard = true; model.pointer(nx, ny, performance.now() - 1000);
   }
@@ -312,7 +334,7 @@ document.addEventListener('focusin', event => {
 });
 document.addEventListener('focusout', () => queueMicrotask(() => {
   const active = document.activeElement;
-  if (!scene.contains(active) && !dialog.contains(active)) { focusIntent = 0; refreshIntent(); if (model.state.keyboard) { model.state.keyboard = false; model.leave(); } }
+  if (!scene.contains(active) && !inDialog(active)) { focusIntent = 0; refreshIntent(); if (model.state.keyboard) { model.state.keyboard = false; model.leave(); } }
 }));
 form.addEventListener('input', () => {
   focusIntent = .7 + clamp(form.elements.message.value.length / 240) * .3;
@@ -325,7 +347,7 @@ motionToggle.addEventListener('click', () => {
     idle.jump(0); clearTimeout(idleTimer); stopSentry();
     integrityLive = true;
   } else noteActivity();
-  resetContactFeedback();
+  resetContactFeedback(); resetVerseFeedback();
   applyMotionPolicy();
 });
 document.addEventListener('visibilitychange', updateAmbient);
@@ -364,22 +386,24 @@ press('#open-contact, .send-button', element => {
   animate(element, { scale: .97 }, pressSpring);
   return () => animate(element, { scale: 1 }, pressSpring);
 });
+press(verseButton, () => { highlightVerse('press'); return () => highlightVerse(verseActive ? 'lit' : 'rest'); });   // text: light, never scale
 
 function resetServiceMotion() {
   if (still()) textFeedback.reset(); else textFeedback.refresh();
 }
 
-// "Authorize": the perimeter takes a breath, the ember rises, the lattice dims and the camera draws back; the
-// panel springs from the ember's screen position. No slot, seam or gate opens.
+// Dialogs: one controller, one modal at a time, the same glass, spring, trap and close.
+// "Authorize" (contact): the perimeter takes a breath, the ember rises, the lattice dims and the camera draws back.
+// "Purpose" (verse): the ember warms and the perimeter holds still to listen; the verse arrives as light reading
+// across the words, and no glyph ever moves. Both panels spring from the ember's screen position.
 function stopModalAnimations() { modalAnimations.forEach(control => control.stop()); modalAnimations = []; }
-function coreTransform() {
-  const from = anchor.getBoundingClientRect(); const to = dialog.getBoundingClientRect();
+function coreTransform(d = dialogs.contact) {
+  const from = anchor.getBoundingClientRect(); const to = d.dialog.getBoundingClientRect();
   return `translate(${from.x + from.width / 2 - to.x - to.width / 2}px, ${from.y + from.height / 2 - to.y - to.height / 2}px) scale(.5)`;
 }
-function setScenery(value) {
-  const values = { u_dolly: [value, value], u_dim: [value, value], u_open: [value, value] };
-  animate(uniforms, values, { duration: 0 }).complete();          // keep Motion's own values in step with the still
-  for (const key of Object.keys(values)) uniforms[key].value = value;
+function setScenery(values) {
+  animate(uniforms, Object.fromEntries(Object.entries(values).map(([key, value]) => [key, [value, value]])), { duration: 0 }).complete();   // keep Motion's own values in step with the still
+  for (const [key, value] of Object.entries(values)) uniforms[key].value = value;
   sentinel.drawOnce();
 }
 function focusContact() {
@@ -387,94 +411,176 @@ function focusContact() {
   else if (submitting) $('#close-contact').focus({ preventScroll: true });
   else $('#name').focus({ preventScroll: true });
 }
-function openContact(origin = trigger) {
+
+// The verse: words take the light in reading order, arriving warm and cooling to their resting colour (CSS owns
+// it: silver, or dawn for "a future and a hope", which therefore stays lit). Kicker and citation decode.
+// Scene still => no decorative text light; the structural panel transition still plays.
+const verseBody = $('#verse-body');
+const verseWords = wrapWords(verseBody.querySelector('p'));
+const verseFinal = new Map(verseWords.map(word => [word, getComputedStyle(word).color]));
+const verseDecoded = [$('.verse-kicker'), $('.verse-cite cite'), $('.verse-translation')];
+function settleVerse() {
+  setImmediateMotion([...verseWords, ...verseDecoded], { opacity: 1 });
+  verseWords.forEach(word => setImmediateMotion(word, { color: verseFinal.get(word) }));
+  verseDecoded.forEach(element => decode(element, { reduced: true }));
+}
+function revealVerse(live) {
+  if (!live) { settleVerse(); return; }
+  const [kicker, cite, translation] = verseDecoded;
+  const first = .7, step = .024, last = first + (verseWords.length - 1) * step;   // words start once the panel has landed (>= 99 %)
+  setImmediateMotion([kicker, cite], { opacity: 1 });
+  setImmediateMotion([translation, ...verseWords], { opacity: 0 });              // the translation's CSS dot arrives with its words
+  verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: ['#FFEBD0', verseFinal.get(word)] }, {
+    delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
+  })));
+  modalAnimations.push(animate(translation, { opacity: 1 }, { delay: last + .13, duration: .25, ease: 'linear' }));
+  decode(kicker, { duration: .6, alphaDuration: .3, fraction: .6, delay: .6 });
+  decode(cite, { duration: .5, alphaDuration: .25, fraction: .6, delay: last + .03 });
+  decode(translation, { duration: .5, alphaDuration: .25, fraction: .6, delay: last + .13 });
+}
+function concealVerse() {
+  verseDecoded.forEach(element => stopDecode(element));
+  modalAnimations.push(animate([...verseWords, ...verseDecoded], { opacity: 0 }, { duration: .12 }));
+}
+
+const dialogs = {
+  contact: {
+    name: 'contact', dialog, surface, closeButton: $('#close-contact'), origin: trigger, initial: null,
+    items: () => dialog.querySelectorAll('.dialog-item'), focus: focusContact, sceneOpacity: .22, veilOpacity: .5,
+    scenery: () => [
+      animate(uniforms, { u_open: 1 }, { duration: .5, ease }),
+      animate(uniforms, { u_dolly: 1 }, { duration: .7, ease }),
+      animate(uniforms, { u_dim: 1 }, { duration: .5, ease }),
+      animate(uniforms, { u_ca: [.4, 0] }, { duration: .7 }),
+    ],
+    closeScenery: () => animate(uniforms, { u_open: 0, u_dolly: 0, u_dim: 0 }, { duration: .6, ease }),
+    stillOpen: { u_dolly: 1, u_dim: 1, u_open: 1 }, stillClosed: { u_dolly: 0, u_dim: 0, u_open: 0 },
+    onOpen() {}, reveal: null, settle: null, conceal: null,
+    afterClose() { if (!still()) { integrityLive = false; labels.blinkIntegrity(.9, .998).then(() => { integrityLive = true; }); } },
+  },
+  verse: {
+    name: 'verse', dialog: verseDialog, surface: verseSurface, closeButton: $('#close-verse'), origin: verseButton, initial: verseBody,
+    items: () => [], focus: () => verseBody.focus({ preventScroll: true }), sceneOpacity: .3, veilOpacity: .42,
+    scenery: () => [                                   // no chromatic aberration: the verse is not a security event
+      animate(uniforms, { u_warm: 1 }, { duration: .6, ease }),
+      animate(uniforms, { u_tight: 1 }, { duration: .8, ease }),
+      animate(uniforms, { u_open: .5 }, { duration: .5, ease }),
+      animate(uniforms, { u_dolly: .3 }, { duration: .7, ease }),
+      animate(uniforms, { u_dim: 1 }, { duration: .5, ease }),
+    ],
+    closeScenery: () => animate(uniforms, { u_open: 0, u_dolly: 0, u_dim: 0, u_warm: 0, u_tight: 0 }, { duration: .6, ease }),
+    stillOpen: { u_open: .5, u_dolly: .3, u_dim: 1, u_warm: 1, u_tight: 1 }, stillClosed: { u_open: 0, u_dolly: 0, u_dim: 0, u_warm: 0, u_tight: 0 },
+    onOpen() { if (!still()) { this.purpose = true; labels.setState('PURPOSE'); boost('u_boostGreet', .3, .9); } },   // the ember exhales as the panel leaves it
+    reveal: revealVerse, settle: settleVerse, conceal: concealVerse,
+    afterClose() {
+      if (this.purpose) { this.purpose = false; labels.setState(model.state.state); }
+      if (!still() && entered && verseActive) animate(uniforms, { u_warm: .4 }, { duration: .5, ease });   // focus is back on the verse: its light holds
+    },
+  },
+};
+function openDialog(d, origin = d.origin) {
   if (modalState === 'open' || modalState === 'opening') return;
-  const wasClosed = !dialog.open; const serial = ++modalSerial;
+  if (current && current !== d) return;
+  const wasClosed = !d.dialog.open; const serial = ++modalSerial;
   stopModalAnimations();
-  if (wasClosed) { returnFocus = origin; dialog.showModal(); }
+  if (wasClosed) { returnFocus = origin; d.dialog.showModal(); d.openedAt = performance.now(); }
+  current = d;
   modalState = 'opening'; idle.jump(0); clearTimeout(idleTimer); stopSentry(); labels.hideAll();
-  surface.scrollTop = 0; focusContact(); updateAmbient();
+  d.surface.scrollTop = 0; d.focus(); updateAmbient(); d.onOpen();
   if (reducedMotion.matches) {
-    surface.style.transform = 'none'; surface.style.opacity = '1';
-    document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
-    scene.style.opacity = '.22'; veil.style.opacity = '.5'; setScenery(1);
+    d.surface.style.transform = 'none'; d.surface.style.opacity = '1';
+    d.items().forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
+    d.settle?.();
+    scene.style.opacity = String(d.sceneOpacity); veil.style.opacity = String(d.veilOpacity); setScenery(d.stillOpen);
     modalState = 'open'; updateAmbient(); return;
   }
-  const scenery = paused ? (setScenery(1), []) : [
-    animate(uniforms, { u_open: 1 }, { duration: .5, ease }),
-    animate(uniforms, { u_dolly: 1 }, { duration: .7, ease }),
-    animate(uniforms, { u_dim: 1 }, { duration: .5, ease }),
-    animate(uniforms, { u_ca: [.4, 0] }, { duration: .7 }),
-  ];
-  const panel = animate(surface, { transform: wasClosed ? [coreTransform(), 'translate(0px, 0px) scale(1)'] : 'translate(0px, 0px) scale(1)' }, { type: 'spring', visualDuration: .6, bounce: .05 });
+  const scenery = paused ? (setScenery(d.stillOpen), []) : d.scenery();
+  const panel = animate(d.surface, { transform: wasClosed ? [coreTransform(d), 'translate(0px, 0px) scale(1)'] : 'translate(0px, 0px) scale(1)' }, { type: 'spring', visualDuration: .6, bounce: .05 });
   modalAnimations.push(panel, ...scenery,
-    animate(surface, { opacity: wasClosed ? [0, 1] : 1 }, { duration: .3, ease }),
-    animate(veil, { opacity: .5 }, { duration: .35 }),
-    animate(scene, { opacity: .22 }, { duration: .35, ease }),
-    animate(document.querySelectorAll('.dialog-item'), { opacity: [0, 1], y: [9, 0] }, { duration: .36, ease, delay: stagger(.035, { startDelay: .18 }) }),
+    animate(d.surface, { opacity: wasClosed ? [0, 1] : 1 }, { duration: .3, ease }),
+    animate(veil, { opacity: d.veilOpacity }, { duration: .35 }),
+    animate(scene, { opacity: d.sceneOpacity }, { duration: .35, ease }),
   );
+  const items = d.items();
+  if (items.length) modalAnimations.push(animate(items, { opacity: [0, 1], y: [9, 0] }, { duration: .36, ease, delay: stagger(.035, { startDelay: .18 }) }));
+  d.reveal?.(!still());
   Promise.all([panel, ...scenery].map(control => control.finished)).then(() => {
     if (serial !== modalSerial) return;
     modalState = 'open'; updateAmbient();
   });
 }
-function finishClose(serial) {
+function finishClose(d, serial) {
   if (serial !== modalSerial) return;
-  dialog.close(); modalState = 'closed';
+  d.dialog.close(); modalState = 'closed'; current = null;
   scene.style.opacity = '1'; veil.style.opacity = '0';
-  if (still()) setScenery(0);
-  updateAmbient(); noteActivity(); (returnFocus?.isConnected ? returnFocus : trigger).focus({ preventScroll: true });
-  if (!still()) { integrityLive = false; labels.blinkIntegrity(.9, .998).then(() => { integrityLive = true; }); }
+  if (still()) setScenery(d.stillClosed);
+  updateAmbient(); noteActivity(); (returnFocus?.isConnected ? returnFocus : d.origin).focus({ preventScroll: true });
+  d.afterClose();
 }
-function closeContact() {
-  if (!dialog.open || modalState === 'closing') return;
+function closeDialog(d) {
+  if (!d.dialog.open || modalState === 'closing') return;
   const serial = ++modalSerial; stopModalAnimations(); modalState = 'closing'; updateAmbient();
-  if (reducedMotion.matches) { finishClose(serial); return; }
-  const panel = animate(surface, { transform: coreTransform(), opacity: 0 }, { duration: .28, ease: [0.4, 0, 0.2, 1] });
+  if (reducedMotion.matches) { finishClose(d, serial); return; }
+  d.conceal?.();
+  const panel = animate(d.surface, { transform: coreTransform(d), opacity: 0 }, { duration: .28, ease: [0.4, 0, 0.2, 1] });
+  const items = d.items();
   modalAnimations.push(panel,
-    animate(document.querySelectorAll('.dialog-item'), { opacity: 0 }, { duration: .12 }),
+    ...(items.length ? [animate(items, { opacity: 0 }, { duration: .12 })] : []),
     animate(veil, { opacity: 0 }, { duration: .28 }),
     animate(scene, { opacity: 1 }, { duration: .28, ease }),
   );
-  if (!paused) modalAnimations.push(animate(uniforms, { u_open: 0, u_dolly: 0, u_dim: 0 }, { duration: .6, ease }));
-  panel.finished.then(() => finishClose(serial));
+  if (!paused) modalAnimations.push(d.closeScenery());
+  panel.finished.then(() => finishClose(d, serial));
 }
+function openContact(origin = trigger) { openDialog(dialogs.contact, origin); }
+function closeContact() { closeDialog(dialogs.contact); }
+function wireDialog(d) {
+  d.closeButton.addEventListener('click', () => closeDialog(d));
+  d.dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(d); });
+  d.dialog.addEventListener('keydown', event => {
+    if (event.key !== 'Tab' || !d.dialog.open) return;
+    const controls = [...d.dialog.querySelectorAll('button, input, textarea, select, a[href], [tabindex]')]
+      .filter(el => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length && !el.closest('[inert]'));
+    const first = controls[0]; const last = controls.at(-1);
+    if (!first) return;
+    const stray = document.activeElement === d.initial;   // the verse body holds focus for reading; Tab goes to the controls
+    if (event.shiftKey && (document.activeElement === first || !d.dialog.contains(document.activeElement) || stray)) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !d.dialog.contains(document.activeElement) || stray)) {
+      event.preventDefault(); first.focus();
+    }
+  });
+  let backdropDown = false;
+  const outsidePanel = event => { const rect = d.dialog.getBoundingClientRect(); return event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom; };
+  d.dialog.addEventListener('pointerdown', event => { backdropDown = event.target === d.dialog && outsidePanel(event) && !(d.name === 'verse' && event.timeStamp - d.openedAt < 500); });   // the verse line lies outside its panel: a double-click is not a dismissal
+  d.dialog.addEventListener('pointerup', event => { if (backdropDown && event.target === d.dialog && outsidePanel(event)) closeDialog(d); backdropDown = false; });
+  d.dialog.addEventListener('pointermove', event => {
+    if (d.dialog.open) visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse');
+  }, { passive: true });
+}
+Object.values(dialogs).forEach(wireDialog);
 trigger.addEventListener('click', () => openContact(trigger));
-$('#close-contact').addEventListener('click', closeContact);
-dialog.addEventListener('cancel', event => { event.preventDefault(); closeContact(); });
-dialog.addEventListener('keydown', event => {
-  if (event.key !== 'Tab' || !dialog.open) return;
-  const controls = [...dialog.querySelectorAll('button, input, textarea, select, a[href], [tabindex]')]
-    .filter(el => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length && !el.closest('[inert]'));
-  const first = controls[0]; const last = controls.at(-1);
-  if (!first) return;
-  if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
-    event.preventDefault(); last.focus();
-  } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
-    event.preventDefault(); first.focus();
-  }
-});
-let backdropDown = false;
-function outsidePanel(event) { const rect = dialog.getBoundingClientRect(); return event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom; }
-dialog.addEventListener('pointerdown', event => { backdropDown = event.target === dialog && outsidePanel(event); });
-dialog.addEventListener('pointerup', event => { if (backdropDown && event.target === dialog && outsidePanel(event)) closeContact(); backdropDown = false; });
+verseButton.addEventListener('click', () => openDialog(dialogs.verse));
 
 reducedMotion.addEventListener('change', () => {
   if (reducedMotion.matches) {
     entrance.forEach(control => control.complete()); successAnimations.forEach(control => control.complete());
     contactHover.forEach(control => control.stop()); idle.jump(0); clearTimeout(idleTimer); stopSentry();
-    resetContactFeedback(); integrityLive = true;
+    resetContactFeedback(); resetVerseFeedback(); integrityLive = true;
     const state = modalState; const serial = ++modalSerial; stopModalAnimations();
-    if (state === 'closing') finishClose(serial);
-    else if (dialog.open) {
-      surface.style.transform = 'none'; surface.style.opacity = '1';
-      document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
-      scene.style.opacity = '.22'; veil.style.opacity = '.5'; setScenery(1); modalState = 'open';
+    if (state === 'closing' && current) finishClose(current, serial);
+    else if (current?.dialog.open) {
+      const d = current;
+      d.surface.style.transform = 'none'; d.surface.style.opacity = '1';
+      d.items().forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
+      d.settle?.();
+      scene.style.opacity = String(d.sceneOpacity); veil.style.opacity = String(d.veilOpacity); setScenery(d.stillOpen); modalState = 'open';
     }
     entered = true; model.state.entered = true;
   } else armIdle();
   applyMotionPolicy();
 });
+verseButton.disabled = false;
 
 const fields = ['name', 'email', 'message'].map(name => form.elements.namedItem(name));
 function validate(field) {
