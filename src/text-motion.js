@@ -103,7 +103,7 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
         const dot = document.createElement('span'); dot.className = 'service-separator'; dot.textContent = '·'; dot.setAttribute('aria-hidden', 'true'); li.appendChild(dot);
       }
     }
-    const line = element.matches('.service') ? document.createElement('span') : null;
+    const line = element.matches('.service, [data-motion-line]') ? document.createElement('span') : null;   // the bullets' underline
     const record = { element, color, canonical, labels: [], colors: new Map(), chars: [], line, dots: [], origin: '50% 50%', controls: [], hover: false, focus: false, touch: false, active: false, timer: 0 };
     makeInk(record);
     if (line) { line.className = 'service-light'; line.setAttribute('aria-hidden', 'true'); element.appendChild(line); }
@@ -139,6 +139,13 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       stop(record); record.canonical = text; element.replaceChildren(document.createTextNode(text)); makeInk(record);
       if (record.line) element.appendChild(record.line);
       render(record, true);
+    },
+    // the hover response played once (light wave, underline), e.g. as an element is revealed; nothing moves
+    flash(element, ms = 900) {
+      const record = records.get(element);
+      if (!record || !canAnimate()) return;
+      clearTimeout(record.flashTimer); set(record, 'touch', true);
+      record.flashTimer = setTimeout(() => set(record, 'touch', false), ms);
     },
     reset() { records.forEach(record => render(record, true)); },
     refresh() { records.forEach(record => render(record, !canAnimate())); },

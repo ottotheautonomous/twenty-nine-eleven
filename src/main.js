@@ -77,7 +77,7 @@ model.state.entered = entered;
 const labels = sentinel.labels;
 if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-button, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-button, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
   canAnimate: () => !still(),
   onActive: rowActive,
 });
@@ -432,29 +432,30 @@ function focusContact() {
 const verseBody = $('#verse-body');
 const verseWords = wrapWords(verseBody.querySelector('p'));
 const verseFinal = new Map(verseWords.map(word => [word, getComputedStyle(word).color]));
-const verseDecoded = [$('.verse-kicker'), $('.verse-cite cite'), $('.verse-translation')];
+const verseKicker = $('.verse-kicker'), verseRef = $('.verse-ref');
+let verseFlash = null;
 function settleVerse() {
-  setImmediateMotion([...verseWords, ...verseDecoded], { opacity: 1 });
+  setImmediateMotion([...verseWords, verseKicker, verseRef], { opacity: 1 });
   verseWords.forEach(word => setImmediateMotion(word, { color: verseFinal.get(word) }));
-  verseDecoded.forEach(element => decode(element, { reduced: true }));
+  decode(verseKicker, { reduced: true });
 }
 function revealVerse(live) {
   if (!live) { settleVerse(); return; }
-  const [kicker, cite, translation] = verseDecoded;
   const first = .7, step = .024, last = first + (verseWords.length - 1) * step;   // words start once the panel has landed (>= 99 %)
-  setImmediateMotion([kicker, cite], { opacity: 1 });
-  setImmediateMotion([translation, ...verseWords], { opacity: 0 });              // the translation's CSS dot arrives with its words
+  setImmediateMotion(verseKicker, { opacity: 1 });
+  setImmediateMotion([verseRef, ...verseWords], { opacity: 0 });
   verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: ['#FFEBD0', verseFinal.get(word)] }, {
     delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
   })));
-  modalAnimations.push(animate(translation, { opacity: 1 }, { delay: last + .13, duration: .25, ease: 'linear' }));
-  decode(kicker, { duration: .6, alphaDuration: .3, fraction: .6, delay: .6 });
-  decode(cite, { duration: .5, alphaDuration: .25, fraction: .6, delay: last + .03 });
-  decode(translation, { duration: .5, alphaDuration: .25, fraction: .6, delay: last + .13 });
+  decode(verseKicker, { duration: .6, alphaDuration: .3, fraction: .6, delay: .6 });
+  // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
+  modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .3, ease: 'easeOut' }));
+  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 1100); }, last + .2);
 }
 function concealVerse() {
-  verseDecoded.forEach(element => stopDecode(element));
-  modalAnimations.push(animate([...verseWords, ...verseDecoded], { opacity: 0 }, { duration: .12 }));
+  verseFlash?.(); verseFlash = null;
+  stopDecode(verseKicker);
+  modalAnimations.push(animate([...verseWords, verseKicker, verseRef], { opacity: 0 }, { duration: .12 }));
 }
 
 const dialogs = {

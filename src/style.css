@@ -151,9 +151,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .verse-word { display: inline; }
 .lord { font-size: .8em; letter-spacing: .06em; }
 .verse-key { font-style: normal; color: var(--dawn); }
-.verse-cite { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px .6em; margin: 20px 0 0; font: 400 11px/1.6 'IBM Plex Mono', monospace; letter-spacing: .07em; color: var(--muted); }
-.verse-cite cite { font-style: normal; color: var(--text-2); }
-.verse-translation::before { content: '·'; margin-right: .6em; opacity: .65; }
+.verse-cite { display: flex; justify-content: center; margin: 20px 0 0; font: 400 11px/1.6 'IBM Plex Mono', monospace; letter-spacing: .07em; color: var(--muted); }
+.verse-ref { position: relative; display: inline-flex; align-items: center; min-height: 26px; font-style: normal; color: var(--text-2); cursor: default; -webkit-user-select: none; user-select: none; }   /* the bullets' response: light wave + underline, nothing moves */
 .text-button { border: 0; border-bottom: 1px solid var(--rule); background: none; color: var(--silver); margin-top: 30px; padding: 10px 0; font-size: 12px; }
 .text-button span { margin-left: 20px; color: var(--dawn); }
 .text-button:hover, .text-button:focus-visible { color: var(--dawn); border-bottom-color: var(--dawn); }
@@ -194,8 +193,6 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 @media (max-width: 360px) {
   .verse-quote p { font-size: 21px; letter-spacing: -.01em; }
-  .verse-cite { display: grid; gap: 2px; }
-  .verse-translation::before { content: none; }
   .services { font-size: 11px; }
   .services-secondary { gap: 4px; }
   .services-secondary li { gap: 4px; }
