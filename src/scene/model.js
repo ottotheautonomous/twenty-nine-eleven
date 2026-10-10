@@ -111,7 +111,7 @@ export function createModel(shape, uniforms) {
     present: 0, crossedAt: -1e9, entered: false,
     probeVel: [0, 0, 0], lastProbeRaw: [0, 0, 0], poke: 0, wake: 0, probeJump: false, handDir: [0, 0, -1],
     // the integrity ledger and the reset (see INTEGRITY / RESET)
-    quietSince: -1e9, damage: 0, deficit: 0, resetting: false, released: false, rollUntil: 0, resetT: -1, front: -10, resetAmp: 0, ampS: 0,
+    quietSince: -1e9, damage: 0, deficit: 0, pressOnly: false, resetting: false, released: false, rollUntil: 0, resetT: -1, front: -10, resetAmp: 0, ampS: 0,
   };
   const eyeDir = [0, 0, -1], tmp3 = [0, 0, 0];
 
@@ -194,7 +194,7 @@ export function createModel(shape, uniforms) {
       }
     }
     const meanDisc = trailGrid.meanInside(cam.shellPx, view.width, view.height);
-    if (s.trail.radius > 0) s.quietSince = s.time;
+    if (s.trail.radius > 0) { s.quietSince = s.time; s.pressOnly = false; }   // a stroke makes it a real ledger
     {
       const I = INTEGRITY, quiet = s.time - s.quietSince, span = I.rest - I.floor;
       if (quiet < I.quiet) {                                                     // under the hand: the ledger only grows
@@ -203,7 +203,7 @@ export function createModel(shape, uniforms) {
         s.deficit = Math.min(span, Math.max(s.deficit, I.liveCap * (1 - Math.exp(-I.live * meanDisc / I.liveCap)), span * s.damage));
       } else if (!s.resetting && s.deficit > 0.01) {                             // a second of quiet: the reset fires
         s.resetting = true; s.released = false; s.resetT = 0; s.front = 0;
-        s.resetAmp = s.deficit >= I.event ? 0.5 + 0.5 * Math.min(1, s.deficit / 0.3) : 0;   // scales with depth; trivial damage is silent
+        s.resetAmp = s.deficit >= I.event && !s.pressOnly ? 0.5 + 0.5 * Math.min(1, s.deficit / 0.3) : 0;   // scales with depth; a click or trivial damage is silent
         s.onReset?.('start', I.rest - s.deficit, s.resetAmp);
       } else if (s.resetting) {
         if (s.resetT >= 0) { s.resetT = Math.min(1, s.resetT + dt / I.wave); s.front = RESET.front * inOut3(s.resetT); if (s.resetT >= 1) { s.resetT = -1; s.front = -10; } }
@@ -211,8 +211,8 @@ export function createModel(shape, uniforms) {
           s.released = true; s.deficit *= 1 - I.release; s.rollUntil = s.time + (s.resetAmp > 0 ? I.roll : 0);
           s.onReset?.('release', I.rest - s.deficit, s.resetAmp);
         } else if (s.released && s.time >= s.rollUntil) s.deficit *= Math.pow(0.5, dt / I.heal);   // the slow climb
-        if (s.released && s.deficit < I.sealAt) { s.deficit = 0; s.damage = 0; s.resetting = false; s.onReset?.('sealed', I.rest, s.resetAmp); s.resetAmp = 0; }
-      } else { s.damage = 0; s.deficit = 0; }
+        if (s.released && s.deficit < I.sealAt) { s.deficit = 0; s.damage = 0; s.pressOnly = false; s.resetting = false; s.onReset?.('sealed', I.rest, s.resetAmp); s.resetAmp = 0; }
+      } else { s.damage = 0; s.deficit = 0; s.pressOnly = false; }
       s.integrity = I.rest - s.deficit;
       s.tear = Math.min(1, Math.max(meanDisc / I.tearRef, s.deficit / 0.45));   // the ember stays dimmed by the ledger until it seals
       s.ampS += ((s.resetT >= 0 && s.simulate ? s.resetAmp : 0) - s.ampS) * (1 - Math.pow(0.7, ratio));   // 6-frame in/out: an abort never pops
@@ -286,7 +286,7 @@ export function createModel(shape, uniforms) {
   function drawStill(view) {
     pf.set(0, 0.1); pf.state.vel = 0; orbit.forEach((c) => c.set(0)); lean.forEach((c) => c.set(0));
     s.vel = 0; s.yaw = 0; s.pitch = 0; s.tear = 0; s.integrity = INTEGRITY.rest; s.labels.length = 0; s.linkAlpha = 0;
-    s.quietSince = -1e9; s.damage = 0; s.deficit = 0; s.resetting = false; s.released = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.ampS = 0;
+    s.quietSince = -1e9; s.damage = 0; s.deficit = 0; s.pressOnly = false; s.resetting = false; s.released = false; s.resetT = -1; s.front = -10; s.resetAmp = 0; s.ampS = 0;
     s.probeS[0] = s.probeS[1] = s.probeS[2] = 0; s.orbitNorm[0] = s.orbitNorm[1] = 0;
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;
     s.poke = 0; s.wake = 0; s.probeJump = true; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
@@ -318,6 +318,7 @@ export function createModel(shape, uniforms) {
     s.trail.ax = s.trail.bx = nx * 0.5 + 0.5; s.trail.ay = s.trail.by = ny * 0.5 + 0.5;
     if (s.simulate) trailGrid.disc(s.trail.ax, s.trail.ay, 0.06, s.aspect);
     s.quietSince = s.time;                                   // a press is a hit
+    if (s.deficit === 0) s.pressOnly = true;                 // ... but a ledger opened by a press alone heals silently
     gridSeg.ax = s.trail.bx; gridSeg.ay = s.trail.by; gridSeg.radius = 0;
   }
   function tap(nx, ny) {
