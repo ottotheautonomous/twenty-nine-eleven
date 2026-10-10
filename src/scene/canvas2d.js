@@ -105,6 +105,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     const pnx = Math.cos(ringLon), pnz = -Math.sin(ringLon);
     const tapT = u.u_tapT.value, tapX = u.u_tapX.value, tapY = u.u_tapY.value, tapZ = u.u_tapZ.value, sentry = u.u_sentry.value;
     const KEY = cam.lightDir;
+    const dens = 2000 / N;                              // luminance stays put as the sprite count changes
     for (let i = 0; i < N; i++) {
       const hx = shape.homes[i * 4], hy = shape.homes[i * 4 + 1], hz = shape.homes[i * 4 + 2], r = shape.homes[i * 4 + 3];
       // build-inward front in view space
@@ -166,7 +167,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
-      inten[i] = built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
+      inten[i] = dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----

@@ -11,11 +11,11 @@ import { LATTICE } from './constants.js';
 // Backing caps are high so hi-DPI screens get native-resolution particles (low caps upscale into blur); the
 // governor lowers the scale, then quality, when frames run long.
 export const TIERS = {
-  xe: { name: 'xe', mobile: false, state32: true, side: [512, 512], rowsStart: 256, rowsMax: 256, fluidRes: 128, jacobi: 8, bloomLevels: 6, hdrScale: 1, dprCap: 2.0, mpCap: 3.5, fps: 60 },
+  xe: { name: 'xe', mobile: false, state32: true, side: [512, 512], rowsStart: 512, rowsMax: 512, fluidRes: 128, jacobi: 8, bloomLevels: 6, hdrScale: 1, dprCap: 2.0, mpCap: 3.5, fps: 60 },
   uhd: { name: 'uhd', mobile: false, state32: false, side: [512, 256], rowsStart: 128, rowsMax: 256, fluidRes: 96, jacobi: 6, bloomLevels: 5, hdrScale: 1, dprCap: 1.5, mpCap: 1.6, fps: 60 },
   android: { name: 'android', mobile: true, state32: false, side: [256, 256], rowsStart: 128, rowsMax: 256, fluidRes: 64, jacobi: 4, bloomLevels: 4, hdrScale: 0.75, dprCap: 2.0, mpCap: 1.0, fps: 30 },
   iphone: { name: 'iphone', mobile: true, state32: false, side: [512, 256], rowsStart: 128, rowsMax: 256, fluidRes: 128, jacobi: 8, bloomLevels: 5, hdrScale: 1, dprCap: 2.0, mpCap: 1.6, fps: 60 },
-  c2d: { name: 'c2d', mobile: false, sprites: 2000, dprCap: 2.0, mpCap: 2.6, fps: 30 },
+  c2d: { name: 'c2d', mobile: false, sprites: 3000, dprCap: 2.0, mpCap: 2.6, fps: 30 },
 };
 
 function pickTier(probe, override, force) {
@@ -67,8 +67,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   let step = 0, cooldownUntil = 0, mpScale = 1;
   let stillPending = false, readoutEl = null;
   const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // per renderer: TIERS stay untouched
-  const LADDER_GL = ['bloom', 'rows', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'];
-  const LADDER_C2D = ['sprites', 'sprites', 'mp'];
+  const LADDER_GL = ['rows', 'bloom', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'];   // sheds the doubled rows before softening HDR
+  const LADDER_C2D = ['sprites', 'sprites', 'sprites', 'sprites', 'mp'];                   // 3000 -> 1000 in 500s, then resolution
   const FLUID_STEPS = [64, 96, 128];
 
   function budget() {
@@ -114,7 +114,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // One ladder step (dir -1 = cheaper, +1 = richer), clamped to the tier's own maxima.
   function applyStep(kind, dir) {
     if (kind === 'rows') { rows = dir < 0 ? Math.max(tier.rowsStart / 8, rows / 2) : Math.min(tier.rowsStart, rows * 2); renderer.setRows?.(rows); return; }
-    if (kind === 'sprites') { const n = (renderer.sprites || 2000) + (dir < 0 ? -500 : 500); renderer.setSprites?.(Math.max(1000, Math.min(tier.sprites || 2000, n))); return; }
+    if (kind === 'sprites') { const n = (renderer.sprites || 3000) + (dir < 0 ? -500 : 500); renderer.setSprites?.(Math.max(1000, Math.min(tier.sprites || 3000, n))); return; }
     if (kind === 'mp') { mpScale = dir < 0 ? 0.69 : 1; resize(); return; }
     if (kind === 'bloom') {
       quality.bloomLevels = dir < 0 ? Math.max(1, tier.bloomLevels - 1) : tier.bloomLevels;
