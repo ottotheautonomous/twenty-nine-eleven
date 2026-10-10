@@ -57,7 +57,7 @@ const threshold = createThreshold(canvas, anchor, uniforms, { debug: Math.max(0,
 root.dataset.renderer = threshold.type;
 if (debug >= 0) window.__tne = { uniforms, threshold };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service-control, .verse, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
   canAnimate: () => !still(),
 });
 // The wordmark sits on the floor, farther than the door: it parallaxes opposite
@@ -258,7 +258,7 @@ trigger.addEventListener('focus', () => highlightContact(true));
 trigger.addEventListener('blur', () => highlightContact(false));
 // Tactile press on every control.
 const pressSpring = { type: 'spring', stiffness: 400, damping: 30 };
-press('.service-control, #open-contact, .send-button', element => {
+press('#open-contact, .send-button', element => {
   if (still()) return;
   animate(element, { scale: .97 }, pressSpring);
   return () => animate(element, { scale: 1 }, pressSpring);
@@ -266,14 +266,6 @@ press('.service-control, #open-contact, .send-button', element => {
 
 function resetServiceMotion() {
   if (still()) textFeedback.reset(); else textFeedback.refresh();
-}
-for (const button of document.querySelectorAll('.service-control')) {
-  button.addEventListener('click', () => {
-    if (!submitting && !form.elements.message.value.trim() && success.hidden) {
-      form.elements.message.value = `I'm interested in ${button.dataset.service}.\n\n`;
-    }
-    openContact(button);
-  });
 }
 
 // The contact panel comes through the door: it grows from the door's screen
@@ -424,4 +416,3 @@ $('#send-another').addEventListener('click', () => {
   status.textContent = ''; status.classList.remove('is-error'); success.hidden = true; form.hidden = false; fields[0].focus({ preventScroll: true });
 });
 sendButton.disabled = false; trigger.disabled = false;
-document.querySelectorAll('.service-control').forEach(button => { button.disabled = false; });

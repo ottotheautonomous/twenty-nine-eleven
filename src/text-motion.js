@@ -31,10 +31,8 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
   }
   function makeInk(record) {
     wrapText(record.element);
-    if (!record.element.matches('.service-control')) {
-      const accessible = document.createElement('span'); accessible.className = 'motion-accessible'; accessible.textContent = record.canonical;
-      record.element.appendChild(accessible);
-    }
+    const accessible = document.createElement('span'); accessible.className = 'motion-accessible'; accessible.textContent = record.canonical;
+    record.element.appendChild(accessible);
     record.labels = [...record.element.querySelectorAll('.motion-label')];
     record.colors = new Map(record.labels.map(label => [label, getComputedStyle(label).color]));
     record.chars = record.labels.flatMap(label => [...label.querySelectorAll('.motion-char')]);
@@ -99,26 +97,25 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
 
   for (const element of elements) {
     const color = getComputedStyle(element).color;
-    const canonical = element.matches('.service-control') ? element.dataset.service : canonicalText(element);
+    const canonical = element.matches('.service') ? element.dataset.service : canonicalText(element);
     if (element.matches('label[for]')) {
       const input = document.getElementById(element.htmlFor);
       if (input && !input.hasAttribute('aria-label') && !input.hasAttribute('aria-labelledby')) input.setAttribute('aria-label', canonical);
     }
-    if (element.matches('.service-control')) {
-      element.setAttribute('aria-label', element.dataset.service);
+    if (element.matches('.service')) {
       const li = element.closest('li');
       if (li.nextElementSibling && !li.querySelector('.service-separator')) {
         const dot = document.createElement('span'); dot.className = 'service-separator'; dot.textContent = '·'; dot.setAttribute('aria-hidden', 'true'); li.appendChild(dot);
       }
     }
-    const line = element.matches('.service-control') ? document.createElement('span') : null;
+    const line = element.matches('.service') ? document.createElement('span') : null;
     const record = { element, color, canonical, labels: [], colors: new Map(), chars: [], line, dots: [], origin: '50% 50%', controls: [], hover: false, focus: false, touch: false, active: false, timer: 0 };
     makeInk(record);
     if (line) { line.className = 'service-light'; line.setAttribute('aria-hidden', 'true'); element.appendChild(line); }
     records.set(element, record);
   }
   for (const record of records.values()) {
-    if (record.element.matches('.service-control')) {
+    if (record.element.matches('.service')) {
       const li = record.element.closest('li');
       record.dots = [li.previousElementSibling?.querySelector('.service-separator'), li.querySelector('.service-separator')].filter(Boolean);
     }
