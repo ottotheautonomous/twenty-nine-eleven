@@ -1,19 +1,18 @@
-# Verification — 9 October 2026
+# Verification — 10 October 2026
 
-The Threshold revision replaces the tape field and shelter mark with a raymarched smoked-glass doorway, dawn behind it and a floor plan beneath it. It was planned and reviewed by Claude Fable and implemented by Claude Opus. Prior versions remain in Git history.
+The Sentinel revision replaces the Threshold doorway and grid floor with a geodesic perimeter of light around an ember, an interaction model built on igloo.inc's documented pointer behaviour, and non-interactive capability rows. Direction: a Fable-overseen research team, four competing Fable concepts, two judges and a Fable spec; implementation by Claude Opus. Prior versions remain in Git history.
 
-- Production frontend build: passed. One JS bundle, about 100 kB (36 kB gzip). No new dependencies; `motion/three` ships with the installed `motion`.
-- Backend tests: 18 passed, using stubbed email delivery. No test email sent.
+- Production build: passed. One JS bundle, about 64 kB gzip (spec budget 75 kB). No new npm dependencies; the scene code is raw WebGL2 lifted from a reviewed kit with its licences in `public/third-party-notices.txt`.
+- Backend tests: 18 passed, with stubbed email delivery. No test email sent.
 - Form validation, payload, submission, success/error copy and "Send another" are byte-identical to the previous revision. Dialog markup is unchanged.
-- Every scene input is a uniform written by Motion (`threeEffect` on a bare uniforms object); the render loop runs on Motion's `frame.render`. No `requestAnimationFrame` in the source.
-- WebGL2 renders were inspected at 1440×900, 390×844 and 320×568 through SwiftShader: door centred on its DOM anchor, warm light only through the opening, ink room, the grid limited to the door's surroundings, no horizontal overflow, both capability rows on one line.
-- Pointer: the camera orbits on a heavy spring, the glass glint and floor pool follow, and the wordmark parallaxes opposite. Hover and focus brighten the dawn through `u_engage`. A press sends a pulse through the door.
-- Modal: the panel grows from the door, the camera dollies back and the dawn dims; the loop stops once the panel has settled. Native dialog focus, Escape, backdrop dismissal and focus restoration were rechecked.
-- Fallbacks were forced in a test browser: without WebGL the Canvas2D renderer projects the same door, opening, shaft and grid; without any canvas the inline still door and a CSS glow are shown and the pause control is hidden. The real in-app browser (no WebGL) uses the Canvas2D path.
-- Reduced motion: no entrance, idle drift, camera motion or pulse; one composed still frame with final uniform values; the pause control is hidden. Pause stops the loop, idle drift and pulse, and resumes cleanly.
-- Keyboard: tab order runs through the capabilities and contact control; focus rings are warm and visible on the dark floor.
-- The WebGL1 path is a source translation of the same shader. It compiles in code review but was not exercised on hardware.
+- Every scene input is a uniform written by Motion (`threeEffect`) or by the CPU model; the loop runs on Motion's `frame.update`/`frame.render`. No `requestAnimationFrame` in the source.
+- WebGL2 (SwiftShader, `?gl=force`) and Canvas2D renders were inspected at 1440×900, 390×844 and 320×568: lattice centred on the DOM anchor, ember at the centre, no floor or grid, type on ink, no horizontal overflow, both rows on one line.
+- Pointer: hairlines lock onto at most five nodes; readouts decode in from the documentation-range pool only; the corner line switches to `TRACKING` and integrity dips and recovers. Row hover keeps its letter wave, underline and separator response, sends a ripple through the lattice, lights the asset class (row 1) or tightens the lattice (row 2).
+- Rows: plain `span`s, `tabIndex -1`, no click handler; a click opens nothing; tab order is contact → pause.
+- Modal: the panel springs from the ember; the lattice breathes, dims and draws back; no slot or gate opens.
+- Fallbacks forced in a test browser: without WebGL the Canvas2D tier draws the same lattice, ember, links and response; without any canvas the WebP poster of the real settled frame is shown and the pause control is hidden.
+- Reduced motion: no entrance, idle, camera motion or pulses; one composed still; pause control hidden. Pause stops everything and resumes cleanly.
 
-**Not yet measured on real GPUs.** SwiftShader screenshots verify the image, not the frame rate. Open the site with `?debug` on a typical laptop and phone: expect about 60 fps at a backing scale of 1.0 or more on desktop. The adaptive governor lowers resolution if frames run long.
+**Not yet measured on real GPUs.** SwiftShader verifies the image, not the frame rate. Run `tools/bench.html` on a typical laptop and phone, and open the site with `?debug` to read fps, tier, backing scale and particle rows. The governor lowers resolution, then particle count, if frames run long.
 
-**Live email delivery remains unverified.** Cloudflare authentication, destination verification and domain onboarding must be completed, followed by an authorized real enquiry and inbox readback. The visible website and email delivery have separate deployment states.
+**Live email delivery remains unverified.** Cloudflare authentication, destination verification and domain onboarding must be completed, followed by an authorized real enquiry and inbox readback.

@@ -1,8 +1,8 @@
 # twenty nine eleven
 
-A centered single page for security and bespoke technology. A hovering smoked-glass doorway stands in a dark room with dawn behind it; the light pours through the opening onto a faint floor plan where the name rests. The camera, light, glass and grid answer pointer, touch and keyboard focus. Every scene input is a [Motion](https://motion.dev/) value, and the render loop runs on Motion's frame scheduler. Two capability rows. No header or footer.
+A centered single page for security and bespoke technology. **Sentinel**: a geodesic perimeter of cold silver light, ten great circles woven into a cage with real gaps, held around one small warm ember. The cage is the perimeter; the ember is what is kept. The visitor's cursor is the probe: where it rests, the lattice notices it; where it sweeps, the lattice tears open in fluid streams and the ember's warmth leaks through the breach; where it settles, hairlines lock onto nearby nodes and print what a penetration tester would read there (documentation-range addresses only). Then the perimeter heals, the readouts retract, and the corner instrument climbs back to `INTEGRITY 0.998`. Once per visit, after two tears, one reading turns red: a finding on a test range.
 
-The door is a design interpretation of the owner's Jeremiah 29:11 naming and helping-people brief: a door that security guards and bespoke technology opens, with the future already lit behind it. The closing colophon, “Plans for hope and a future”, references [Jeremiah 29:11](https://www.biblegateway.com/passage/?search=Jeremiah+29%3A11&version=NIV). It expresses the supplied values without adding other beliefs or promises.
+Every scene input is a [Motion](https://motion.dev/) value and the render loop runs on Motion's frame scheduler. The capability rows are plain text with per-letter Motion feedback that the scene answers. No header or footer. The closing colophon, “Plans for hope and a future”, references [Jeremiah 29:11](https://www.biblegateway.com/passage/?search=Jeremiah+29%3A11&version=NIV); the ember exists before the walls and every tear heals.
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
@@ -42,12 +42,20 @@ Once the fork is authoritative, use that copy for future changes and Cloudflare 
 
 ## Adjust
 
-- `index.html`: company copy, services, form labels and the still door used without a renderer.
-- `src/style.css`: composition, type scale, color tokens and fallback states.
-- `src/main.js`: entrance sequence, pointer/touch/keyboard/idle response, pause, the through-the-door modal, validation and submission.
-- `src/scene-state.js`: the shader uniforms and the Motion springs bound to them.
-- `src/shader.js`: the raymarched door, floor plan, dawn and light shaft (GLSL).
-- `src/threshold.js`: WebGL2/WebGL1 renderer, the Canvas2D projection of the same scene, resolution budget and the Motion frame loop.
+- `index.html`: company copy, services, form labels, the corner instrument and the static poster.
+- `src/style.css`: composition, type scale, colour tokens, readouts and fallback states.
+- `src/main.js`: entrance, pointer/touch/keyboard/idle, press and tap, rows feeding the scene, pause, the modal ("authorize"), validation and submission.
+- `src/scene-state.js`: the shader uniforms and the Motion values bound to them.
+- `src/scene/constants.js`: every tuning constant (lag chain, exposure, orbit, ember, integrity, colours).
+- `src/scene/shape.js`: the lattice (R2 order), the 64 nodes and their security readouts.
+- `src/scene/model.js`: the GL-free interaction model (lag chain, trail grid, integrity, exposure, plexus, greet/lose, dwell, finding).
+- `src/scene/webgl.js`, `particles.js`, `fluid.js`, `bloom.js`, `glsl/*`: the WebGL2 pipeline (fluid, GPGPU particles, trail, ember, bloom, composite).
+- `src/scene/canvas2d.js`: the same scene drawn with Canvas2D sprites when WebGL2 is unavailable.
+- `src/scene/sentinel.js`: tier selection, resolution budget and governor, the Motion frame loop, context loss.
 - `src/text-motion.js`: per-letter Motion waves, label illumination, underlines and separator feedback.
 
-Append `?debug` to show the renderer, frame rate and backing scale; `?debug=1` to `4` show door coverage, the door's light mask, the haze and the floor alone.
+QA flags: `?debug` (readout and `window.__tne`), `?gl=force` (use WebGL even on software renderers), `?tier=xe|uhd|android|iphone|c2d`, `?still=1` (the composed still), `?quality` (disable the governor), `?shape=0` (six-circle lattice).
+
+The static poster `public/sentinel-still.webp` is the real settled WebGL frame, rendered headlessly with `?gl=force&still=1` and cropped to the anchor box plus 13 %. Regenerate it after changing the look.
+
+Performance has not been measured on a real GPU yet. Open `tools/bench.html` on a typical laptop and phone (serve the folder, or open the file directly on the laptop) and run the quick sweep; its `points`-vs-count and `fluid`-vs-iterations rows set the start tiers in `src/scene/sentinel.js`. Third-party licences for the scene code are in `public/third-party-notices.txt`.

@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hero Pipeline Bench</title>
+<meta name="description" content="WebGL2 hero-pipeline benchmark: stable-fluids velocity field, MRT GPGPU particles, additive HDR points, trail, dual-filter bloom, composite and FXAA. Prints ms per stage.">
+<style>
+:root{--bg:#05080b;--panel:rgba(6,10,13,.9);--fg:#d8e2e8;--dim:#82919a;--acc:#ffb36b;--ok:#7fd1c7;--bad:#ff7b6b;--line:#1d2830}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#05080b;--panel:rgba(6,10,13,.9);--fg:#d8e2e8}}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;-webkit-text-size-adjust:100%}
+canvas#c{position:fixed;left:0;top:0;width:100%;height:100%;display:block;z-index:0;touch-action:none}
+#ui{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:16px;box-sizing:border-box}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:0 0 12px}
+h1{font-size:15px;margin:0 0 6px;font-weight:600;letter-spacing:.02em}
+h2{font-size:13px;margin:0 0 8px;color:var(--acc);font-weight:600}
+.dim{color:var(--dim)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;word-break:break-word}
+.kv b{font-weight:500;color:var(--dim)}
+.renderer{font-size:14px;color:var(--acc);word-break:break-word}
+.row{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:6px 0}
+label{display:inline-flex;gap:6px;align-items:center}
+select,button,input{font:inherit;color:var(--fg);background:#0c1318;border:1px solid #2a3943;border-radius:6px;padding:5px 8px}
+button{cursor:pointer}
+button.primary{background:#2a1c0e;border-color:#7a4e24;color:#ffd2a6}
+button:disabled{opacity:.5;cursor:default}
+#status{position:fixed;left:8px;right:8px;bottom:8px;z-index:2;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;display:none;font-size:12px}
+#status.on{display:block}
+textarea{width:100%;box-sizing:border-box;min-height:220px;background:#081015;color:var(--fg);border:1px solid #2a3943;border-radius:6px;font:12px/1.35 ui-monospace,Menlo,Consolas,monospace;padding:8px;white-space:pre;overflow:auto}
+.tablewrap{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;font-size:12px;white-space:nowrap}
+th,td{border-bottom:1px solid var(--line);padding:3px 7px;text-align:right}
+th{color:var(--dim);font-weight:500}
+td.l,th.l{text-align:left}
+td.over{color:var(--bad)} td.good{color:var(--ok)}
+.err{color:var(--bad);white-space:pre-wrap}
+ul{margin:4px 0 0 18px;padding:0}
+.hidden{display:none}
+@media (max-width:600px){#ui{padding:10px}.kv{grid-template-columns:1fr}.kv b{margin-top:4px}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div class="panel hidden" id="p-res">
+    <h2>Results</h2>
+    <div class="tablewrap"><table id="tbl"></table></div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="b-copy">Copy results</button>
+      <button id="b-again">Back to controls</button>
+      <span class="dim" id="copied"></span>
+    </div>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+  </div>
+  <div class="panel" id="p-info">
+    <h1>Hero pipeline bench <span class="dim">(WebGL2, one file)</span></h1>
+    <div class="renderer" id="renderer">probing...</div>
+    <div class="kv" id="kv" style="margin-top:8px"></div>
+  </div>
+  <div class="panel" id="p-ctl">
+    <h2>Sweep</h2>
+    <div class="row">
+      <label>DPR <select id="o-dpr"></select></label>
+      <label>HDR scale <select id="o-hdr"><option>1</option><option>0.75</option><option>0.5</option></select></label>
+      <label>state <select id="o-state"><option value="auto">auto (32F if renderable)</option><option value="32f">RGBA32F</option><option value="16f">RGBA16F</option></select></label>
+      <label>fluid short side <select id="o-fluid"><option>128</option><option>96</option><option>64</option></select></label>
+      <label>bloom levels <select id="o-levels"><option>6</option><option>5</option><option>4</option></select></label>
+      <label>bloom format <select id="o-bfmt"><option value="rgba16f">RGBA16F</option><option value="r11g11b10f">R11F_G11F_B10F</option></select></label>
+    </div>
+    <div class="row">
+      <label>point px <select id="o-ps"><option value="2,6">2-6 (target px)</option><option value="1,3">1-3</option><option value="3,9">3-9</option><option value="dpr">2-6 CSS px x DPR</option></select></label>
+      <label><input type="checkbox" id="o-fxaa" checked> FXAA</label>
+      <label><input type="checkbox" id="o-trail" checked> trail (1/5 res)</label>
+      <label><input type="checkbox" id="o-quads"> + quad rows (2 triangles/particle, no gl.POINTS)</label>
+      <label><input type="checkbox" id="o-sync"> sync timing even if GPU timer exists</label>
+    </div>
+    <div class="row">
+      <label>sweep <select id="o-sweep"><option value="full">full: 16k/65k/131k/262k x bloom on/off x Jacobi 2/8/20 (24)</option><option value="quick">quick (7)</option></select></label>
+      <label>frames/config <select id="o-frames"><option>60</option><option>120</option><option>30</option></select></label>
+    </div>
+    <div class="row">
+      <button class="primary" id="b-run">Run sweep</button>
+      <button id="b-live">Live view</button>
+      <span class="dim" id="hint"></span>
+    </div>
+    <ul class="dim">
+      <li>Plug the laptop in, close other tabs, keep this tab in front. Phones: turn off Low Power Mode or Battery Saver, keep the screen on.</li>
+      <li>GPU timer (EXT_disjoint_timer_query_webgl2) gives true GPU ms per stage. Without it (Safari, Firefox, Android) the page times K repeats of each stage between 1-pixel readbacks: those numbers are upper bounds (pipeline drain, no overlap). The rAF column is what the display actually got.</li>
+      <li>Tap the canvas or press Esc to stop a sweep. Copy the result block and send it back.</li>
+    </ul>
+  </div>
+  <div class="panel hidden" id="p-err"><h2>Problem</h2><div class="err" id="err"></div></div>
+</div>
+<div id="status"></div>
+<script>
+(function () {
+'use strict';
+var $ = function (s) { return document.querySelector(s); };
+var Q = new URLSearchParams(location.search);
+var canvas = $('#c');
+var now = function () { return performance.now(); };
+var bench = window.__bench = { done: false, results: [], info: null, error: null, markdown: '' };
+function fail(msg) {
+  bench.error = msg; bench.done = true;
+  $('#p-err').classList.remove('hidden'); $('#err').textContent = msg;
+  console.log('[bench] ERROR ' + msg);
+}
+
+// ------------------------------------------------------------------ context
+var gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' });
+if (!gl) {
+  $('#renderer').textContent = 'WebGL2 unavailable';
+  var g1 = document.createElement('canvas').getContext('webgl');
+  fail('No WebGL2 context. ' + (g1 ? 'WebGL1 exists, so this device would get the Canvas2D tier.' : 'No WebGL at all: Canvas2D tier.') + '\nUA: ' + navigator.userAgent);
+  return;
+}
+var EXT = {
+  cbf: !!gl.getExtension('EXT_color_buffer_float'),
+  cbhf: !!gl.getExtension('EXT_color_buffer_half_float'),
+  floatBlend: !!gl.getExtension('EXT_float_blend'),
+  floatLinear: !!gl.getExtension('OES_texture_float_linear'),
+  timer: gl.getExtension('EXT_disjoint_timer_query_webgl2'),
+  parallel: gl.getExtension('KHR_parallel_shader_compile'),
+  lose: gl.getExtension('WEBGL_lose_context'),
+  dbg: gl.getExtension('WEBGL_debug_renderer_info')
+};
+var lost = false;
+canvas.addEventListener('webglcontextlost', function (e) { e.preventDefault(); lost = true; abortFlag = true; fail('WebGL context lost (backgrounded, memory pressure or GPU reset). Reload the page to run again.'); });
+
+function safe(fn, d) { try { return fn(); } catch (e) { return d; } }
+var INFO = {
+  unmaskedRenderer: EXT.dbg ? safe(function () { return gl.getParameter(EXT.dbg.UNMASKED_RENDERER_WEBGL); }, '') : '(WEBGL_debug_renderer_info unavailable)',
+  unmaskedVendor: EXT.dbg ? safe(function () { return gl.getParameter(EXT.dbg.UNMASKED_VENDOR_WEBGL); }, '') : '',
+  renderer: gl.getParameter(gl.RENDERER), vendor: gl.getParameter(gl.VENDOR), version: gl.getParameter(gl.VERSION),
+  ua: navigator.userAgent, dpr: window.devicePixelRatio || 1,
+  maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE), pointSizeRange: Array.prototype.slice.call(gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)),
+  maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS), vertexTextureUnits: gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
+  colorBufferFloat: EXT.cbf, colorBufferHalfFloat: EXT.cbhf, floatBlend: EXT.floatBlend, floatLinear: EXT.floatLinear,
+  timerQuery: !!EXT.timer, parallelCompile: !!EXT.parallel,
+  cores: navigator.hardwareConcurrency || null, deviceMemory: navigator.deviceMemory || null,
+  coarsePointer: matchMedia('(pointer: coarse)').matches
+};
+INFO.gpuClass = classify(INFO.unmaskedRenderer + ' ' + INFO.renderer);
+bench.info = INFO;
+function classify(r) {
+  r = String(r).toLowerCase();
+  if (/swiftshader|llvmpipe|softpipe|software|basic render|lavapipe/.test(r)) return 'software rasteriser (would get the Canvas2D tier)';
+  if (/iris\(r\) xe|iris xe/.test(r)) return 'Intel Iris Xe (Xe-LP, 80-96 EU)';
+  if (/(u?hd) graphics (6[0-9]{2})/.test(r)) return 'Intel Gen9/9.5 (HD/UHD 6xx, 24 EU class)';
+  if (/uhd graphics/.test(r)) return 'Intel UHD (Xe-LP with fewer EUs; a single-channel Iris Xe laptop also reports UHD)';
+  if (/intel/.test(r)) return 'Intel (other)';
+  var m = /adreno[^0-9]*([0-9]{3})/.exec(r); if (m) return 'Adreno ' + m[1][0] + 'xx (' + m[1] + ')';
+  m = /mali-?(g[0-9]+)/.exec(r); if (m) return 'Mali-' + m[1].toUpperCase();
+  if (/powervr|imagination/.test(r)) return 'PowerVR';
+  if (/apple/.test(r)) return 'Apple GPU (Safari hides the model; use the device name)';
+  if (/nvidia|geforce|radeon|amd/.test(r)) return 'discrete/other desktop GPU';
+  return 'unknown';
+}
+
+// ------------------------------------------------------------------ shaders
+var VS = '#version 300 es\nout vec2 vUv;\nvoid main(){ vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); vUv = p; gl_Position = vec4(p * 2. - 1., 0., 1.); }';
+var HEAD = '#version 300 es\nprecision highp float; precision highp int; precision highp sampler2D;\nin vec2 vUv;\n';
+var HASH = 'uint hash3(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; return v.x + v.y * v.z; }\n';
+var FS = {
+  splat: 'out vec4 o; uniform sampler2D uSrc; uniform vec2 uPoint, uForce; uniform float uRadius, uAspect;\n' +
+    'void main(){ vec2 d = vUv - uPoint; d.x *= uAspect; float g = exp(-dot(d, d) / uRadius); vec4 s = texture(uSrc, vUv);\n' +
+    ' o = vec4(s.xy + uForce * g, s.z + length(uForce) * g * .02, 1.); }',
+  advect: 'out vec4 o; uniform sampler2D uSrc; uniform vec2 uTexel; uniform float uDt, uDiss;\n' +
+    'void main(){ vec2 v = texture(uSrc, vUv).xy; vec4 s = texture(uSrc, vUv - uDt * v * uTexel); o = vec4(s.xyz * uDiss, 1.); }',
+  div: 'out vec4 o; uniform sampler2D uSrc; uniform vec2 uTexel;\n' +
+    'void main(){ float L = texture(uSrc, vUv - vec2(uTexel.x, 0)).x, R = texture(uSrc, vUv + vec2(uTexel.x, 0)).x;\n' +
+    ' float B = texture(uSrc, vUv - vec2(0, uTexel.y)).y, T = texture(uSrc, vUv + vec2(0, uTexel.y)).y; o = vec4(.5 * (R - L + T - B), 0, 0, 1); }',
+  jacobi: 'out vec4 o; uniform sampler2D uSrc, uDiv; uniform vec2 uTexel;\n' +
+    'void main(){ float L = texture(uSrc, vUv - vec2(uTexel.x, 0)).x, R = texture(uSrc, vUv + vec2(uTexel.x, 0)).x;\n' +
+    ' float B = texture(uSrc, vUv - vec2(0, uTexel.y)).x, T = texture(uSrc, vUv + vec2(0, uTexel.y)).x;\n' +
+    ' o = vec4((L + R + B + T - texture(uDiv, vUv).x) * .25, 0, 0, 1); }',
+  grad: 'out vec4 o; uniform sampler2D uSrc, uP; uniform vec2 uTexel;\n' +
+    'void main(){ float L = texture(uP, vUv - vec2(uTexel.x, 0)).x, R = texture(uP, vUv + vec2(uTexel.x, 0)).x;\n' +
+    ' float B = texture(uP, vUv - vec2(0, uTexel.y)).x, T = texture(uP, vUv + vec2(0, uTexel.y)).x;\n' +
+    ' vec4 v = texture(uSrc, vUv); o = vec4(v.xy - .5 * vec2(R - L, T - B), v.zw); }',
+  sim: 'uniform sampler2D uOff, uVel, uHome, uFluid; uniform mat4 uVP; uniform vec3 uRight, uUp;\n' +
+    'uniform float uDt, uTime, uK, uDamp, uNoise, uGain;\n' +
+    'layout(location = 0) out vec4 oOff; layout(location = 1) out vec4 oVel;\n' +
+    'vec3 field(vec3 p){ return vec3(sin(p.y * 1.7 + uTime) * cos(p.z * 1.3), sin(p.z * 1.9 + uTime * .8) * cos(p.x * 1.1), sin(p.x * 1.5 - uTime * .6) * cos(p.y * 1.7)); }\n' +
+    'vec3 curl(vec3 p){ const float e = .05; vec3 dx = vec3(e, 0, 0), dy = vec3(0, e, 0), dz = vec3(0, 0, e);\n' +
+    ' vec3 a = field(p + dx) - field(p - dx), b = field(p + dy) - field(p - dy), c = field(p + dz) - field(p - dz);\n' +
+    ' return vec3(b.z - c.y, c.x - a.z, a.y - b.x) / (2. * e); }\n' +
+    'void main(){ ivec2 c = ivec2(gl_FragCoord.xy); vec4 off = texelFetch(uOff, c, 0), vel = texelFetch(uVel, c, 0), home = texelFetch(uHome, c, 0);\n' +
+    ' vec3 p = home.xyz + off.xyz; vec4 clip = uVP * vec4(p, 1.); vec2 suv = clip.xy / clip.w * .5 + .5;\n' +
+    ' vec3 f = texture(uFluid, suv).xyz;\n' +
+    ' vec3 acc = -uK * off.xyz - uDamp * vel.xyz + curl(p * .9) * uNoise * (.3 + f.z) + (uRight * f.x + uUp * f.y) * uGain;\n' +
+    ' vel.xyz += acc * uDt; vel.w = mix(vel.w, f.z + length(f.xy) * .01, .08); oOff = vec4(off.xyz + vel.xyz * uDt, vel.w); oVel = vel; }',
+  trail: 'out vec4 o; uniform sampler2D uPrev, uScene, uVel; uniform vec2 uSceneTexel; uniform float uDecay, uAdv;\n' +
+    'void main(){ vec2 h = uSceneTexel * 1.5;\n' +
+    ' vec3 s = (texture(uScene, vUv - h).rgb + texture(uScene, vUv + h).rgb + texture(uScene, vUv + vec2(h.x, -h.y)).rgb + texture(uScene, vUv + vec2(-h.x, h.y)).rgb) * .25;\n' +
+    ' vec2 v = texture(uVel, vUv).xy; vec3 p = texture(uPrev, vUv - v * uAdv).rgb;\n' +
+    ' o = vec4(min(p * uDecay + s * (1. - uDecay), vec3(6e4)), 1.); }',
+  down: 'out vec4 o; uniform sampler2D uSrc; uniform vec2 uTexel; uniform float uKaris;\n' +
+    'vec4 tap(vec2 uv, float w){ vec3 c = min(texture(uSrc, uv).rgb, vec3(6e4)); float k = uKaris > .5 ? 1. / (1. + dot(c, vec3(.2126, .7152, .0722))) : 1.; return vec4(c * w * k, w * k); }\n' +
+    'void main(){ vec2 h = uTexel * .5; vec4 s = tap(vUv, 4.) + tap(vUv - h, 1.) + tap(vUv + h, 1.) + tap(vUv + vec2(h.x, -h.y), 1.) + tap(vUv - vec2(h.x, -h.y), 1.);\n' +
+    ' o = vec4(s.rgb / max(s.a, 1e-4), 1.); }',
+  up: 'out vec4 o; uniform sampler2D uSrc; uniform vec2 uTexel;\n' +
+    'void main(){ vec2 h = uTexel * .5; vec3 s = texture(uSrc, vUv + vec2(-h.x * 2., 0)).rgb + texture(uSrc, vUv + vec2(h.x * 2., 0)).rgb\n' +
+    ' + texture(uSrc, vUv + vec2(0, h.y * 2.)).rgb + texture(uSrc, vUv + vec2(0, -h.y * 2.)).rgb\n' +
+    ' + (texture(uSrc, vUv + h).rgb + texture(uSrc, vUv - h).rgb + texture(uSrc, vUv + vec2(h.x, -h.y)).rgb + texture(uSrc, vUv - vec2(h.x, -h.y)).rgb) * 2.;\n' +
+    ' o = vec4(s / 12., 1.); }',
+  composite: 'out vec4 o; uniform sampler2D uScene, uBloom, uTrail; uniform float uBloomGain, uTrailGain, uCA, uExposure; uniform uint uFrame;\n' + HASH +
+    'vec3 aces(vec3 x){ return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }\n' +
+    'void main(){ vec2 c = vUv - .5; float r2 = dot(c, c); vec2 d = c * uCA * r2;\n' +
+    ' vec3 col = vec3(texture(uScene, vUv - d).r, texture(uScene, vUv).g, texture(uScene, vUv + d).b);\n' +
+    ' col += texture(uBloom, vUv).rgb * uBloomGain + texture(uTrail, vUv).rgb * uTrailGain;\n' +
+    ' col *= uExposure * (1. - .6 * r2); col = aces(col); col = pow(col, vec3(1. / 2.2));\n' +
+    ' col = col * vec3(1.02, 1., .97) + vec3(.008, .012, .018) * (1. - col);\n' +
+    ' float l = dot(col, vec3(.299, .587, .114)); col = mix(vec3(l), col, 1.08);\n' +
+    ' uint h = hash3(uvec3(uvec2(gl_FragCoord.xy), uFrame)); float n = (float(h & 65535u) + float(h >> 16u)) / 65535. - 1.;\n' +
+    ' col = clamp(col + n / 255., 0., 1.); o = vec4(col, dot(col, vec3(.299, .587, .114))); }',
+  // FXAA 3.11 quality, preset 12 search steps (1, 1.5, 2, 4, 12); luma in alpha from the composite.
+  fxaa: 'out vec4 o; uniform sampler2D uSrc; uniform vec2 uRcp;\n' +
+    'const float SUBPIX = .75, EDGE = .166, EDGEMIN = .0833;\n' +
+    'float L(vec2 p){ return texture(uSrc, p).a; }\n' +
+    'void main(){ vec2 pos = vUv; vec4 M = texture(uSrc, pos); float lumaM = M.a;\n' +
+    ' float lumaS = textureOffset(uSrc, pos, ivec2(0, 1)).a, lumaE = textureOffset(uSrc, pos, ivec2(1, 0)).a, lumaN = textureOffset(uSrc, pos, ivec2(0, -1)).a, lumaW = textureOffset(uSrc, pos, ivec2(-1, 0)).a;\n' +
+    ' float rangeMax = max(max(lumaN, lumaW), max(lumaE, max(lumaS, lumaM))), rangeMin = min(min(lumaN, lumaW), min(lumaE, min(lumaS, lumaM)));\n' +
+    ' float range = rangeMax - rangeMin; if (range < max(EDGEMIN, rangeMax * EDGE)) { o = vec4(M.rgb, 1.); return; }\n' +
+    ' float lumaNW = textureOffset(uSrc, pos, ivec2(-1, -1)).a, lumaSE = textureOffset(uSrc, pos, ivec2(1, 1)).a, lumaNE = textureOffset(uSrc, pos, ivec2(1, -1)).a, lumaSW = textureOffset(uSrc, pos, ivec2(-1, 1)).a;\n' +
+    ' float lumaNS = lumaN + lumaS, lumaWE = lumaW + lumaE, subpixRcpRange = 1. / range, subpixNSWE = lumaNS + lumaWE;\n' +
+    ' float edgeHorz1 = -2. * lumaM + lumaNS, edgeVert1 = -2. * lumaM + lumaWE, lumaNESE = lumaNE + lumaSE, lumaNWNE = lumaNW + lumaNE;\n' +
+    ' float edgeHorz2 = -2. * lumaE + lumaNESE, edgeVert2 = -2. * lumaN + lumaNWNE, lumaNWSW = lumaNW + lumaSW, lumaSWSE = lumaSW + lumaSE;\n' +
+    ' float edgeHorz = abs(-2. * lumaW + lumaNWSW) + abs(edgeHorz1) * 2. + abs(edgeHorz2), edgeVert = abs(-2. * lumaS + lumaSWSE) + abs(edgeVert1) * 2. + abs(edgeVert2);\n' +
+    ' bool horzSpan = edgeHorz >= edgeVert; float lengthSign = horzSpan ? uRcp.y : uRcp.x;\n' +
+    ' if (!horzSpan) { lumaN = lumaW; lumaS = lumaE; }\n' +
+    ' float subpixB = (subpixNSWE * 2. + lumaNWSW + lumaNESE) * (1. / 12.) - lumaM;\n' +
+    ' float gradientN = lumaN - lumaM, gradientS = lumaS - lumaM, lumaNN = lumaN + lumaM, lumaSS = lumaS + lumaM;\n' +
+    ' bool pairN = abs(gradientN) >= abs(gradientS); float gradient = max(abs(gradientN), abs(gradientS)); if (pairN) lengthSign = -lengthSign;\n' +
+    ' float subpixC = clamp(abs(subpixB) * subpixRcpRange, 0., 1.);\n' +
+    ' vec2 posB = pos; vec2 offNP = horzSpan ? vec2(uRcp.x, 0.) : vec2(0., uRcp.y);\n' +
+    ' if (!horzSpan) posB.x += lengthSign * .5; else posB.y += lengthSign * .5;\n' +
+    ' vec2 posN = posB - offNP, posP = posB + offNP; if (!pairN) lumaNN = lumaSS;\n' +
+    ' float gradientScaled = gradient * .25, lumaMM = lumaM - lumaNN * .5; bool lumaMLTZero = lumaMM < 0.;\n' +
+    ' float lumaEndN = L(posN) - lumaNN * .5, lumaEndP = L(posP) - lumaNN * .5;\n' +
+    ' bool doneN = abs(lumaEndN) >= gradientScaled, doneP = abs(lumaEndP) >= gradientScaled;\n' +
+    ' const float STEP[4] = float[4](1.5, 2., 4., 12.);\n' +
+    ' for (int i = 0; i < 4; i++) { if (doneN && doneP) break;\n' +
+    '  if (!doneN) { posN -= offNP * STEP[i]; lumaEndN = L(posN) - lumaNN * .5; doneN = abs(lumaEndN) >= gradientScaled; }\n' +
+    '  if (!doneP) { posP += offNP * STEP[i]; lumaEndP = L(posP) - lumaNN * .5; doneP = abs(lumaEndP) >= gradientScaled; } }\n' +
+    ' float dstN = horzSpan ? pos.x - posN.x : pos.y - posN.y, dstP = horzSpan ? posP.x - pos.x : posP.y - pos.y;\n' +
+    ' bool goodSpan = (dstN < dstP) ? ((lumaEndN < 0.) != lumaMLTZero) : ((lumaEndP < 0.) != lumaMLTZero);\n' +
+    ' float pixelOffset = -min(dstN, dstP) / (dstP + dstN) + .5;\n' +
+    ' float subpixF = (-2. * subpixC + 3.) * subpixC * subpixC, subpixH = subpixF * subpixF * SUBPIX;\n' +
+    ' float off = max(goodSpan ? pixelOffset : 0., subpixH);\n' +
+    ' if (!horzSpan) pos.x += off * lengthSign; else pos.y += off * lengthSign;\n' +
+    ' o = vec4(texture(uSrc, pos).rgb, 1.); }',
+  probe: 'out vec4 o; uniform sampler2D uSrc; void main(){ o = vec4(fract(texture(uSrc, vec2(.5)).rgb + .25), 1.); }',
+  clear: 'out vec4 o; void main(){ o = vec4(.02, .03, .04, 1.); }'
+};
+var PARTICLE_VS = '#version 300 es\nprecision highp float; precision highp int; precision highp sampler2D;\n' +
+  'uniform sampler2D uOff, uHome; uniform mat4 uVP; uniform int uSide; uniform vec2 uPs, uPx2Clip; uniform float uGain;\n' +
+  'out vec3 vCol; out vec2 vUv2;\n' +
+  'void main(){\n' +
+  '#ifdef QUAD\n int id = gl_VertexID / 6, k = gl_VertexID - id * 6, ci = k == 3 ? 2 : k == 4 ? 1 : k == 5 ? 3 : k;\n#else\n int id = gl_VertexID;\n#endif\n' +
+  ' ivec2 c = ivec2(id % uSide, id / uSide); vec4 off = texelFetch(uOff, c, 0), home = texelFetch(uHome, c, 0);\n' +
+  ' vec4 clip = uVP * vec4(home.xyz + off.xyz, 1.); float size = mix(uPs.x, uPs.y, home.w);\n' +
+  '#ifdef QUAD\n vec2 corner = vec2(float(ci & 1), float(ci >> 1)) * 2. - 1.; vUv2 = corner; clip.xy += corner * size * .5 * uPx2Clip * clip.w;\n' +
+  '#else\n gl_PointSize = size; vUv2 = vec2(0);\n#endif\n' +
+  ' gl_Position = clip; float e = clamp(off.w * 2. + length(off.xyz) * 3., 0., 1.);\n' +
+  ' vCol = mix(vec3(.25, .62, .7), vec3(1., .72, .42), e) * (.35 + 2.2 * e) * uGain; }';
+var PARTICLE_FS = '#version 300 es\nprecision highp float; in vec3 vCol; in vec2 vUv2; out vec4 o;\n' +
+  'void main(){\n#ifdef QUAD\n vec2 d = vUv2;\n#else\n vec2 d = gl_PointCoord * 2. - 1.;\n#endif\n' +
+  ' float r2 = dot(d, d); if (r2 > 1.) discard; vec3 n = vec3(d.x, -d.y, sqrt(1. - r2));\n' +
+  ' float l = max(dot(n, vec3(-.39, .49, .78)), 0.), rim = (1. - n.z) * (1. - n.z);\n' +
+  ' o = vec4(min(vCol * (.25 + .9 * l + .6 * rim) * (1. - .5 * r2), vec3(64.)), 1.); }';
+
+// ------------------------------------------------------------------ GL helpers
+var programs = {}, compileMs = 0, nPrograms = 0;
+function shader(type, src) { var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }
+function program(fs, vs) {
+  var p = gl.createProgram(), v = shader(gl.VERTEX_SHADER, vs || VS), f = shader(gl.FRAGMENT_SHADER, fs);
+  gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p); nPrograms++;
+  return { p: p, v: v, f: f, u: null, units: null };
+}
+function ready(rec) {
+  if (rec.u) return rec;
+  if (!gl.getProgramParameter(rec.p, gl.LINK_STATUS)) throw new Error('shader: ' + (gl.getShaderInfoLog(rec.f) || '') + (gl.getShaderInfoLog(rec.v) || '') + (gl.getProgramInfoLog(rec.p) || ''));
+  rec.u = {}; rec.units = {}; var unit = 0;
+  for (var i = 0, n = gl.getProgramParameter(rec.p, gl.ACTIVE_UNIFORMS); i < n; i++) {
+    var info = gl.getActiveUniform(rec.p, i), name = info.name.replace(/\[0\]$/, '');
+    rec.u[name] = { loc: gl.getUniformLocation(rec.p, info.name), type: info.type };
+    if (info.type === gl.SAMPLER_2D) { rec.units[name] = unit; gl.useProgram(rec.p); gl.uniform1i(rec.u[name].loc, unit); unit++; }
+  }
+  return rec;
+}
+function set(rec, values) {
+  gl.useProgram(rec.p);
+  for (var name in values) {
+    var u = rec.u[name]; if (!u) continue; var v = values[name];
+    switch (u.type) {
+      case gl.SAMPLER_2D: gl.activeTexture(gl.TEXTURE0 + rec.units[name]); gl.bindTexture(gl.TEXTURE_2D, v); break;
+      case gl.FLOAT: gl.uniform1f(u.loc, v); break;
+      case gl.INT: case gl.BOOL: gl.uniform1i(u.loc, v); break;
+      case gl.UNSIGNED_INT: gl.uniform1ui(u.loc, v >>> 0); break;
+      case gl.FLOAT_VEC2: gl.uniform2fv(u.loc, v); break;
+      case gl.FLOAT_VEC3: gl.uniform3fv(u.loc, v); break;
+      case gl.FLOAT_VEC4: gl.uniform4fv(u.loc, v); break;
+      case gl.FLOAT_MAT4: gl.uniformMatrix4fv(u.loc, false, v); break;
+    }
+  }
+}
+var FMT = {
+  rgba16f: [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, 8],
+  rgba32f: [gl.RGBA32F, gl.RGBA, gl.FLOAT, 16],
+  rgba8: [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, 4],
+  r11g11b10f: [gl.R11F_G11F_B10F, gl.RGB, gl.HALF_FLOAT, 4]
+};
+var owned = { tex: [], fbo: [] };
+function tex(w, h, fmt, filter, data) {
+  var f = FMT[fmt], t = gl.createTexture(); owned.tex.push(t); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, f[0], w, h, 0, f[1], f[2], data || null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function target(w, h, fmt, filter) {
+  var t = tex(w, h, fmt, filter === undefined ? gl.LINEAR : filter), f = gl.createFramebuffer(); owned.fbo.push(f);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error(fmt + ' ' + w + 'x' + h + ' not renderable');
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  return { t: t, f: f, w: w, h: h };
+}
+function pair(w, h, fmt, filter) {
+  var a = [target(w, h, fmt, filter), target(w, h, fmt, filter)];
+  return { get read() { return a[0]; }, get write() { return a[1]; }, swap: function () { a.reverse(); } };
+}
+function freeAll(list) { list.tex.forEach(function (t) { gl.deleteTexture(t); }); list.fbo.forEach(function (f) { gl.deleteFramebuffer(f); }); list.tex = []; list.fbo = []; }
+function pass(rec, dst, values, w, h) {
+  set(ready(rec), values); gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.f : null);
+  gl.viewport(0, 0, w || (dst ? dst.w : gl.drawingBufferWidth), h || (dst ? dst.h : gl.drawingBufferHeight)); gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// ------------------------------------------------------------------ build programs (timed: ANGLE/D3D11 compile cost is real)
+var P;
+try {
+  var c0 = now();
+  P = {};
+  Object.keys(FS).forEach(function (k) { P[k] = program(HEAD + FS[k]); });
+  P.points = program(PARTICLE_FS, PARTICLE_VS);
+  P.quads = program(PARTICLE_FS.replace('#version 300 es\n', '#version 300 es\n#define QUAD\n'), PARTICLE_VS.replace('#version 300 es\n', '#version 300 es\n#define QUAD\n'));
+  Object.keys(P).forEach(function (k) { ready(P[k]); });
+  compileMs = now() - c0;
+} catch (e) { fail(String(e.message || e)); return; }
+INFO.compileLinkMs = +compileMs.toFixed(1); INFO.programs = nPrograms;
+var vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+
+// ------------------------------------------------------------------ fixed resources: 512^2 particle state + home
+var SIDE = 512;
+var black = tex(1, 1, 'rgba8', gl.NEAREST, new Uint8Array([0, 0, 0, 255]));
+var homeTex = (function () {
+  var N = SIDE * SIDE, home = new Float32Array(N * 4);
+  for (var i = 0; i < N; i++) {
+    // R2 low-discrepancy order: every prefix of rows covers the whole shape, so a 16k tier looks like the 262k one, only sparser.
+    var u = (0.5 + i * 0.7548776662466927) % 1, v = (0.5 + i * 0.5698402909980532) % 1, th = u * Math.PI * 2, ph = Math.acos(1 - 2 * v), j = i * 4;
+    if (i % 4 === 3) { var rr = 1.15 + 0.04 * Math.sin(i * 1.7); home[j] = Math.cos(th) * rr; home[j + 1] = 0.03 * Math.sin(i * 2.3); home[j + 2] = Math.sin(th) * rr; }
+    else { var shell = i % 4 === 0 ? 0.92 : 0.55 + 0.06 * Math.sin(i); home[j] = Math.sin(ph) * Math.cos(th) * shell; home[j + 1] = Math.cos(ph) * shell; home[j + 2] = Math.sin(ph) * Math.sin(th) * shell; }
+    home[j + 3] = ((Math.imul(i, 2654435761) >>> 0) / 4294967296);
+  }
+  return tex(SIDE, SIDE, 'rgba32f', gl.NEAREST, home);
+})();
+var stateRes = { tex: [], fbo: [] }, state = null, stateFmt = null;
+function buildState(want) {
+  var fmt = want === '16f' || (want === 'auto' && !EXT.cbf) || !EXT.cbf ? 'rgba16f' : 'rgba32f';
+  if (state && fmt === stateFmt) return;
+  var keep = owned; owned = stateRes; freeAll(stateRes);
+  function mk(fm) {
+    var a = tex(SIDE, SIDE, fm, gl.NEAREST), b = tex(SIDE, SIDE, fm, gl.NEAREST), f = gl.createFramebuffer(); owned.fbo.push(f);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, a, 0); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, b, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    var ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    return ok ? { off: a, vel: b, f: f } : null;
+  }
+  var s0 = mk(fmt), s1 = s0 && mk(fmt);
+  if (!s1 && fmt === 'rgba32f') { freeAll(stateRes); fmt = 'rgba16f'; s0 = mk(fmt); s1 = s0 && mk(fmt); }
+  owned = keep;
+  if (!s1) throw new Error('MRT particle state not renderable in RGBA32F or RGBA16F');
+  state = [s0, s1]; stateFmt = fmt;
+}
+var probeT = target(1, 1, 'rgba8', gl.NEAREST);
+
+// ------------------------------------------------------------------ size-dependent resources
+var sized = { tex: [], fbo: [] }, R = null;
+function cssSize() { var r = canvas.getBoundingClientRect(); return [Math.max(1, r.width), Math.max(1, r.height)]; }
+function buildSized(cfg) {
+  var css = cssSize(), W = Math.max(1, Math.round(css[0] * cfg.dpr)), H = Math.max(1, Math.round(css[1] * cfg.dpr));
+  var key = [W, H, cfg.hdr, cfg.fluid, cfg.levels, cfg.bfmt].join('|');
+  if (R && R.key === key) return R;
+  var keep = owned; owned = sized; freeAll(sized);
+  canvas.width = W; canvas.height = H;
+  var aspect = W / H, fw, fh;
+  if (aspect >= 1) { fh = cfg.fluid; fw = Math.round(cfg.fluid * aspect); } else { fw = cfg.fluid; fh = Math.round(cfg.fluid / aspect); }
+  var sw = Math.max(1, Math.round(W * cfg.hdr)), sh = Math.max(1, Math.round(H * cfg.hdr));
+  var r = { key: key, W: W, H: H, aspect: aspect, fw: fw, fh: fh, sw: sw, sh: sh, css: css };
+  r.fv = pair(fw, fh, 'rgba16f', gl.LINEAR); r.fp = pair(fw, fh, 'rgba16f', gl.NEAREST); r.fdiv = target(fw, fh, 'rgba16f', gl.NEAREST);
+  r.scene = target(sw, sh, 'rgba16f', gl.LINEAR);
+  r.trail = pair(Math.max(1, Math.round(W / 5)), Math.max(1, Math.round(H / 5)), 'rgba16f', gl.LINEAR);
+  var bf = cfg.bfmt === 'r11g11b10f' && EXT.cbf ? 'r11g11b10f' : 'rgba16f';
+  r.mips = [];
+  for (var i = 0, mw = sw, mh = sh; i < cfg.levels; i++) { mw = Math.max(1, mw >> 1); mh = Math.max(1, mh >> 1); r.mips.push(target(mw, mh, bf, gl.LINEAR)); }
+  r.ldr = target(W, H, 'rgba8', gl.LINEAR);
+  r.bfmt = bf;
+  owned = keep; R = r; return r;
+}
+
+// ------------------------------------------------------------------ camera
+function camera(yaw, pitch, aspect) {
+  var d = 3.9, cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  var eye = [sy * cp * d, sp * d, cy * cp * d], f = eye.map(function (v) { return -v / d; });
+  var rl = Math.hypot(f[2], f[0]), r = [f[2] / rl, 0, -f[0] / rl];
+  var u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  var t = 1 / Math.tan(0.35), n = .1, far = 20;
+  var view = [r[0], u[0], -f[0], 0, r[1], u[1], -f[1], 0, r[2], u[2], -f[2], 0,
+    -(r[0] * eye[0] + r[1] * eye[1] + r[2] * eye[2]), -(u[0] * eye[0] + u[1] * eye[1] + u[2] * eye[2]), f[0] * eye[0] + f[1] * eye[1] + f[2] * eye[2], 1];
+  var sx = aspect >= 1 ? t / aspect : t, syy = aspect >= 1 ? t : t * aspect;
+  var proj = [sx, 0, 0, 0, 0, syy, 0, 0, 0, 0, (far + n) / (n - far), -1, 0, 0, 2 * far * n / (n - far), 0];
+  var m = new Float32Array(16);
+  for (var i = 0; i < 4; i++) for (var j = 0; j < 4; j++) { var s = 0; for (var k = 0; k < 4; k++) s += proj[k * 4 + j] * view[i * 4 + k]; m[i * 4 + j] = s; }
+  return { vp: m, right: r, up: u };
+}
+
+// ------------------------------------------------------------------ pipeline stages
+var cfg = null, frameNo = 0, simTime = 0, cam = null, pointer = { x: .5, y: .5, dx: 0, dy: 0 };
+var DT = 1 / 60;
+function input(i) {
+  var a = i * 0.05, x = .5 + .3 * Math.cos(a), y = .5 + .25 * Math.sin(a * 1.3);
+  pointer.dx = x - pointer.x; pointer.dy = y - pointer.y; pointer.x = x; pointer.y = y;
+  cam = camera(i * .003, -.28, R.aspect);
+}
+var STAGES = {
+  fluid: function () {
+    var r = R, texel = [1 / r.fw, 1 / r.fh];
+    gl.disable(gl.BLEND);
+    pass(P.splat, r.fv.write, { uSrc: r.fv.read.t, uPoint: [pointer.x, pointer.y], uForce: [pointer.dx * r.fw * 6, pointer.dy * r.fh * 6], uRadius: .0025, uAspect: r.aspect }); r.fv.swap();
+    pass(P.advect, r.fv.write, { uSrc: r.fv.read.t, uTexel: texel, uDt: DT * 60, uDiss: .975 }); r.fv.swap();
+    pass(P.div, r.fdiv, { uSrc: r.fv.read.t, uTexel: texel });
+    for (var i = 0; i < cfg.jacobi; i++) { pass(P.jacobi, r.fp.write, { uSrc: r.fp.read.t, uDiv: r.fdiv.t, uTexel: texel }); r.fp.swap(); }
+    pass(P.grad, r.fv.write, { uSrc: r.fv.read.t, uP: r.fp.read.t, uTexel: texel }); r.fv.swap();
+  },
+  sim: function () {
+    var rows = Math.ceil(cfg.n / SIDE);
+    gl.disable(gl.BLEND);
+    set(P.sim, { uOff: state[0].off, uVel: state[0].vel, uHome: homeTex, uFluid: R.fv.read.t, uVP: cam.vp, uRight: cam.right, uUp: cam.up, uDt: DT, uTime: simTime % 1000, uK: 6, uDamp: 2.4, uNoise: .35, uGain: .004 });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, state[1].f); gl.viewport(0, 0, SIDE, rows); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    state.reverse(); simTime += DT;
+  },
+  points: function () {
+    var r = R;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, r.scene.f); gl.viewport(0, 0, r.sw, r.sh); gl.clearColor(.0015, .0025, .004, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    var ps = cfg.ps, rec = cfg.prim === 'quads' ? P.quads : P.points;
+    set(rec, { uOff: state[0].off, uHome: homeTex, uVP: cam.vp, uSide: SIDE, uPs: ps, uPx2Clip: [2 / r.sw, 2 / r.sh], uGain: .1 * Math.sqrt(65536 / cfg.n) });
+    if (cfg.prim === 'quads') gl.drawArrays(gl.TRIANGLES, 0, 6 * cfg.n); else gl.drawArrays(gl.POINTS, 0, cfg.n); // quads: 6 vertices per particle, no instancing
+    gl.disable(gl.BLEND);
+  },
+  trail: function () {
+    var r = R; gl.disable(gl.BLEND);
+    pass(P.trail, r.trail.write, { uPrev: r.trail.read.t, uScene: r.scene.t, uVel: r.fv.read.t, uSceneTexel: [1 / r.sw, 1 / r.sh], uDecay: .92, uAdv: .0015 }); r.trail.swap();
+  },
+  bloom: function () {
+    var r = R, src = r.scene; gl.disable(gl.BLEND);
+    for (var i = 0; i < r.mips.length; i++) { pass(P.down, r.mips[i], { uSrc: src.t, uTexel: [1 / src.w, 1 / src.h], uKaris: i === 0 ? 1 : 0 }); src = r.mips[i]; }
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    for (var j = r.mips.length - 1; j > 0; j--) pass(P.up, r.mips[j - 1], { uSrc: r.mips[j].t, uTexel: [1 / r.mips[j].w, 1 / r.mips[j].h] });
+    gl.disable(gl.BLEND);
+  },
+  composite: function () {
+    var r = R; gl.disable(gl.BLEND);
+    pass(P.composite, cfg.fxaa ? r.ldr : null, { uScene: r.scene.t, uBloom: cfg.bloom ? r.mips[0].t : black, uTrail: cfg.trail ? r.trail.read.t : black,
+      uBloomGain: cfg.bloom ? .35 : 0, uTrailGain: cfg.trail ? .35 : 0, uCA: .015, uExposure: 1.1, uFrame: frameNo });
+  },
+  fxaa: function () { gl.disable(gl.BLEND); pass(P.fxaa, null, { uSrc: R.ldr.t, uRcp: [1 / R.W, 1 / R.H] }); }
+};
+function stageList(c) {
+  var l = ['fluid', 'sim', 'points'];
+  if (c.trail) l.push('trail'); if (c.bloom) l.push('bloom'); l.push('composite'); if (c.fxaa) l.push('fxaa');
+  return l;
+}
+function stageOut(name) {
+  switch (name) {
+    case 'fluid': return R.fv.read.t; case 'sim': return state[0].off; case 'points': return R.scene.t;
+    case 'trail': return R.trail.read.t; case 'bloom': return R.mips[0].t; case 'composite': return cfg.fxaa ? R.ldr.t : null;
+    default: return null;
+  }
+}
+
+// ------------------------------------------------------------------ timing
+var px = new Uint8Array(4);
+function probe(t) { // 1-pixel dependent readback = CPU waits for the GPU to finish everything before it
+  if (t) { gl.disable(gl.BLEND); pass(P.probe, probeT, { uSrc: t }); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+  else { gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+}
+var timerOK = !!EXT.timer, qPool = [], pending = [];
+function frame(timed) {
+  frameNo++; input(frameNo);
+  var list = stageList(cfg);
+  for (var i = 0; i < list.length; i++) {
+    if (timed) { var q = qPool.pop() || gl.createQuery(); gl.beginQuery(EXT.timer.TIME_ELAPSED_EXT, q); STAGES[list[i]](); gl.endQuery(EXT.timer.TIME_ELAPSED_EXT); pending.push({ s: list[i], q: q, f: frameNo }); }
+    else STAGES[list[i]]();
+  }
+}
+function poll(sink) {
+  if (!pending.length) return;
+  var disjoint = gl.getParameter(EXT.timer.GPU_DISJOINT_EXT), keep = [];
+  for (var i = 0; i < pending.length; i++) {
+    var p = pending[i];
+    if (!gl.getQueryParameter(p.q, gl.QUERY_RESULT_AVAILABLE)) { keep.push(p); continue; }
+    var ns = gl.getQueryParameter(p.q, gl.QUERY_RESULT);
+    if (!disjoint && sink) sink(p, ns / 1e6);
+    qPool.push(p.q);
+  }
+  pending = keep;
+}
+function stats(a) {
+  if (!a.length) return { p50: NaN, p95: NaN, mean: NaN, n: 0 };
+  var s = a.slice().sort(function (x, y) { return x - y; }), m = 0; for (var i = 0; i < s.length; i++) m += s[i];
+  return { p50: s[s.length >> 1], p95: s[Math.min(s.length - 1, Math.floor(s.length * .95))], mean: m / s.length, n: s.length };
+}
+function raf() { return new Promise(function (res) { requestAnimationFrame(res); }); }
+function idle(ms) { return new Promise(function (res) { setTimeout(res, ms || 0); }); }
+var abortFlag = false;
+
+async function displayInterval() {
+  var d = [], last = null;
+  for (var i = 0; i < 45; i++) { var t = await raf(); if (last !== null) d.push(t - last); last = t; }
+  return stats(d).p50;
+}
+
+// Sync timing: K repeats of fn bracketed by 1-pixel readbacks, minus the readback-only cost.
+function syncOverhead(t) {
+  var a = []; for (var i = 0; i < 7; i++) { probe(t); var t0 = now(); probe(t); a.push(now() - t0); } return stats(a).p50;
+}
+async function syncTime(fn, before, after) {
+  var ov = syncOverhead(after), K = 2, out = [];
+  probe(before); var t0 = now(); for (var k = 0; k < K; k++) fn(); probe(after); var est = (now() - t0 - ov) / K;
+  K = Math.max(2, Math.min(32, Math.round(12 / Math.max(est, .05))));
+  for (var r = 0; r < 3; r++) {
+    if (abortFlag) return NaN;
+    await idle(0);
+    probe(before); t0 = now(); for (k = 0; k < K; k++) fn(); probe(after);
+    out.push(Math.max(0, (now() - t0 - ov) / K));
+  }
+  return stats(out).p50;
+}
+
+async function runConfig(c, opts) {
+  cfg = c; buildState(c.state); buildSized(c);
+  var list = stageList(c), useTimer = timerOK && !opts.forceSync;
+  // warm-up: compiles, allocations, GPU clocks
+  for (var w = 0; w < 15; w++) { await raf(); if (abortFlag) return null; frame(false); }
+  probe(null);
+  var samples = {}, byFrame = {}, deltas = [], cpu = [], last = null, t0 = now();
+  list.forEach(function (s) { samples[s] = []; });
+  var sink = function (p, ms) { samples[p.s].push(ms); (byFrame[p.f] = byFrame[p.f] || {})[p.s] = ms; };
+  for (var i = 0; i < opts.frames; i++) {
+    var ts = await raf(); if (abortFlag) return null;
+    if (document.hidden) return { hidden: true };
+    if (last !== null) deltas.push(ts - last); last = ts;
+    if (useTimer) poll(sink);
+    var c0 = now(); frame(useTimer); cpu.push(now() - c0);
+    if (now() - t0 > opts.maxMs && i >= 10) break;
+    if (i % 10 === 0) status('cfg ' + opts.label + ' | frame ' + i + ' | rAF p50 ' + fmt(stats(deltas).p50) + ' ms');
+  }
+  if (useTimer) { for (var k = 0; k < 40 && pending.length; k++) { await raf(); poll(sink); } pending.forEach(function (p) { qPool.push(p.q); }); pending = []; }
+  var res = { n: c.n, bloom: c.bloom, jacobi: c.jacobi, prim: c.prim, raf: stats(deltas), cpu: stats(cpu), stages: {}, src: '', frameSync: NaN };
+  var gotTimer = useTimer && list.every(function (s) { return samples[s].length >= 5; });
+  if (useTimer && !gotTimer && timerOK) { timerOK = false; INFO.timerNote = 'timer extension present but returned no samples; switched to sync timing'; }
+  if (gotTimer) {
+    list.forEach(function (s) { res.stages[s] = stats(samples[s]).p50; });
+    var totals = Object.keys(byFrame).map(function (f) { var o = byFrame[f], t = 0; for (var s = 0; s < list.length; s++) { if (o[list[s]] === undefined) return NaN; t += o[list[s]]; } return t; }).filter(function (x) { return x === x; });
+    res.gpu = stats(totals).p50; res.src = 'timer';
+  }
+  if (!gotTimer || opts.alsoSync) {
+    var sync = {};
+    for (var j = 0; j < list.length; j++) {
+      var s = list[j], before = j ? stageOut(list[j - 1]) : R.fv.read.t;
+      status('cfg ' + opts.label + ' | sync timing ' + s);
+      sync[s] = await syncTime(function () { input(frameNo); STAGES[s](); }, before, stageOut(s));
+      if (abortFlag) return null;
+    }
+    res.frameSync = await syncTime(function () { frame(false); }, null, null);
+    if (!gotTimer) { res.stages = sync; var t = 0; list.forEach(function (s) { t += sync[s]; }); res.gpu = t; res.src = 'sync'; }
+    else res.sync = sync;
+  }
+  return res;
+}
+
+// ------------------------------------------------------------------ UI
+function nlab(n) { return n >= 1000 ? Math.floor(n / 1000) + 'k' : String(n); }
+function fmt(x, d) { return x === x && x !== undefined ? x.toFixed(d === undefined ? 2 : d) : '-'; }
+function status(t) { var s = $('#status'); s.textContent = t; s.classList.add('on'); }
+var dprSel = $('#o-dpr'), realDpr = window.devicePixelRatio || 1;
+[['device', realDpr]].concat([3, 2, 1.75, 1.5, 1.25, 1, 0.75].filter(function (v) { return Math.abs(v - realDpr) > .01; }).map(function (v) { return [String(v), v]; }))
+  .forEach(function (o, i) { var el = document.createElement('option'); el.value = o[1]; el.textContent = i === 0 ? 'device (' + (+realDpr.toFixed(3)) + ')' : o[0]; dprSel.appendChild(el); });
+if (Q.get('dpr')) dprSel.value = Q.get('dpr');
+['hdr', 'state', 'fluid', 'levels', 'bfmt', 'ps', 'sweep', 'frames'].forEach(function (k) { if (Q.get(k)) $('#o-' + k).value = Q.get(k); });
+if (Q.get('quick')) $('#o-sweep').value = 'quick';
+if (Q.get('fxaa') === '0') $('#o-fxaa').checked = false;
+if (Q.get('trail') === '0') $('#o-trail').checked = false;
+if (Q.get('quads') === '1') $('#o-quads').checked = true;
+if (Q.get('sync') === '1') $('#o-sync').checked = true;
+
+function baseCfg() {
+  var dpr = +dprSel.value, psv = $('#o-ps').value, ps = psv === 'dpr' ? [2 * dpr, 6 * dpr] : psv.split(',').map(Number);
+  return { dpr: dpr, hdr: +$('#o-hdr').value, state: $('#o-state').value, fluid: +$('#o-fluid').value, levels: +$('#o-levels').value, bfmt: $('#o-bfmt').value,
+    ps: ps, fxaa: $('#o-fxaa').checked, trail: $('#o-trail').checked, prim: 'points', n: 65536, bloom: true, jacobi: 8 };
+}
+function sweepList(base) {
+  var list = [], Ns = [16384, 65536, 131072, 262144];
+  if ($('#o-sweep').value === 'quick') {
+    Ns.forEach(function (n) { list.push(Object.assign({}, base, { n: n, bloom: true, jacobi: 8 })); });
+    list.push(Object.assign({}, base, { n: 65536, bloom: false, jacobi: 8 }));
+    list.push(Object.assign({}, base, { n: 65536, bloom: true, jacobi: 2 }));
+    list.push(Object.assign({}, base, { n: 65536, bloom: true, jacobi: 20 }));
+  } else {
+    Ns.forEach(function (n) { [true, false].forEach(function (b) { [2, 8, 20].forEach(function (j) { list.push(Object.assign({}, base, { n: n, bloom: b, jacobi: j })); }); }); });
+  }
+  if ($('#o-quads').checked) [131072, 262144].forEach(function (n) { list.push(Object.assign({}, base, { n: n, bloom: true, jacobi: 8, prim: 'quads' })); });
+  return list;
+}
+function infoLines() {
+  var r = R || { W: 0, H: 0, sw: 0, sh: 0, fw: 0, fh: 0, css: [0, 0], bfmt: '' }, b = cfg || baseCfg();
+  return [
+    'renderer: ' + INFO.unmaskedRenderer,
+    'RENDERER/VENDOR: ' + INFO.renderer + ' / ' + INFO.unmaskedVendor,
+    'class guess: ' + INFO.gpuClass,
+    'ua: ' + INFO.ua,
+    'dpr: device ' + INFO.dpr + ', used ' + b.dpr + ' | css ' + Math.round(r.css[0]) + 'x' + Math.round(r.css[1]) + ' | backing ' + r.W + 'x' + r.H + ' = ' + (r.W * r.H / 1e6).toFixed(2) + ' MP | HDR ' + r.sw + 'x' + r.sh + ' (' + b.hdr + 'x)',
+    'display: ' + fmt(INFO.displayMs) + ' ms rAF interval (~' + Math.round(1000 / INFO.displayMs) + ' Hz)' + (INFO.displayMs > 30 ? '  << rAF is capped near 30 Hz: Low Power Mode / Battery Saver?' : ''),
+    'timing: ' + (timerOK && !$('#o-sync').checked ? 'EXT_disjoint_timer_query_webgl2 (GPU ms)' : 'sync readback (upper-bound ms; see notes)') + (INFO.timerNote ? ' [' + INFO.timerNote + ']' : ''),
+    'pipeline: state ' + (stateFmt || '?').toUpperCase() + ' 512^2 MRT, points ' + b.ps.map(function (v) { return +v.toFixed(2); }).join('-') + ' px, fluid ' + r.fw + 'x' + r.fh + ' RGBA16F, bloom ' + b.levels + ' levels ' + (r.bfmt || '').toUpperCase() + ' from 1/2, trail ' + (b.trail ? 'on 1/5' : 'off') + ', FXAA ' + (b.fxaa ? 'on' : 'off'),
+    'caps: maxTex ' + INFO.maxTexture + ', pointSize ' + INFO.pointSizeRange.join('-') + ', drawBuffers ' + INFO.maxDrawBuffers + ', vtxTex ' + INFO.vertexTextureUnits + ', cbf ' + INFO.colorBufferFloat + ', floatBlend ' + INFO.floatBlend + ', floatLinear ' + INFO.floatLinear + ', parallelCompile ' + INFO.parallelCompile,
+    'compile+link: ' + INFO.compileLinkMs + ' ms for ' + INFO.programs + ' programs | cores ' + INFO.cores + ' | deviceMemory ' + INFO.deviceMemory
+  ];
+}
+function renderInfo() {
+  $('#renderer').textContent = INFO.unmaskedRenderer || INFO.renderer;
+  var kv = $('#kv'); kv.innerHTML = '';
+  var rows = [['class guess', INFO.gpuClass], ['RENDERER', INFO.renderer], ['vendor', INFO.unmaskedVendor || INFO.vendor], ['version', INFO.version],
+    ['devicePixelRatio', INFO.dpr], ['GPU timer', INFO.timerQuery ? 'yes (EXT_disjoint_timer_query_webgl2)' : 'no: sync-readback timing'],
+    ['float RT', 'color_buffer_float ' + INFO.colorBufferFloat + ', half ' + INFO.colorBufferHalfFloat + ', float_blend ' + INFO.floatBlend + ', float_linear ' + INFO.floatLinear],
+    ['limits', 'MAX_TEXTURE_SIZE ' + INFO.maxTexture + ', ALIASED_POINT_SIZE_RANGE ' + INFO.pointSizeRange.join('-') + ', MAX_DRAW_BUFFERS ' + INFO.maxDrawBuffers],
+    ['compile+link', INFO.compileLinkMs + ' ms (' + INFO.programs + ' programs)'], ['user agent', INFO.ua]];
+  rows.forEach(function (r) { var b = document.createElement('b'); b.textContent = r[0]; var s = document.createElement('span'); s.textContent = r[1]; kv.appendChild(b); kv.appendChild(s); });
+}
+var COLS = ['fluid', 'sim', 'points', 'trail', 'bloom', 'composite', 'fxaa'];
+function buildOutput(results) {
+  var budget = INFO.displayMs || 16.7;
+  var head = '| N | bloom | J | prim | rAF p50 | rAF p95 | fps | CPU | ' + COLS.join(' | ') + ' | GPU sum | frame(sync) | src |';
+  var sep = '|' + head.split('|').slice(1, -1).map(function () { return '---'; }).join('|') + '|';
+  var lines = results.map(function (r) {
+    return '| ' + nlab(r.n) + ' | ' + (r.bloom ? 'on' : 'off') + ' | ' + r.jacobi + ' | ' + r.prim + ' | ' + fmt(r.raf.p50, 1) + ' | ' + fmt(r.raf.p95, 1) + ' | ' + fmt(1000 / r.raf.p50, 0) + ' | ' + fmt(r.cpu.p50) + ' | ' +
+      COLS.map(function (c) { return r.stages[c] === undefined ? '-' : fmt(r.stages[c]); }).join(' | ') + ' | ' + fmt(r.gpu) + ' | ' + fmt(r.frameSync) + ' | ' + r.src + ' |';
+  });
+  var md = infoLines().map(function (l) { return '# ' + l; }).join('\n') + '\n' + head + '\n' + sep + '\n' + lines.join('\n') + '\n' +
+    '# ms per frame. rAF = measured frame interval (display budget ' + fmt(budget, 1) + ' ms). CPU = JS time to encode the frame (no wait).\n' +
+    '# src=timer: GPU time per stage from EXT_disjoint_timer_query_webgl2 (median). src=sync: K repeats between 1-px readbacks minus readback cost;\n' +
+    '#   upper bounds that include pipeline drain and no inter-stage overlap. frame(sync) = whole frame timed the same way (most trustworthy without a timer).\n';
+  var json = JSON.stringify({ info: INFO, results: results.map(function (r) { return { n: r.n, bloom: r.bloom, jacobi: r.jacobi, prim: r.prim, rafP50: +fmt(r.raf.p50), rafP95: +fmt(r.raf.p95), cpuP50: +fmt(r.cpu.p50), stages: Object.fromEntries(Object.entries(r.stages).map(function (e) { return [e[0], +fmt(e[1], 3)]; })), gpu: +fmt(r.gpu, 3), frameSync: +fmt(r.frameSync, 3), src: r.src }; }) });
+  return { md: md, json: json, budget: budget };
+}
+function renderTable(results) {
+  var o = buildOutput(results), t = $('#tbl'); t.innerHTML = '';
+  var hr = document.createElement('tr');
+  ['N', 'bloom', 'J', 'prim', 'rAF p50', 'p95', 'fps', 'CPU'].concat(COLS, ['GPU sum', 'frame(sync)', 'src']).forEach(function (h, i) { var th = document.createElement('th'); th.textContent = h; if (i < 4) th.className = 'l'; hr.appendChild(th); });
+  t.appendChild(hr);
+  results.forEach(function (r) {
+    var tr = document.createElement('tr');
+    var cells = [nlab(r.n), r.bloom ? 'on' : 'off', r.jacobi, r.prim, fmt(r.raf.p50, 1), fmt(r.raf.p95, 1), fmt(1000 / r.raf.p50, 0), fmt(r.cpu.p50)]
+      .concat(COLS.map(function (c) { return r.stages[c] === undefined ? '-' : fmt(r.stages[c]); }), [fmt(r.gpu), fmt(r.frameSync), r.src]);
+    cells.forEach(function (c, i) {
+      var td = document.createElement('td'); td.textContent = c; if (i < 4) td.className = 'l';
+      if (i === 4) td.className = r.raf.p50 > o.budget * 1.3 ? 'over' : 'good';
+      if (i === 15) td.className = r.gpu > o.budget * .8 ? 'over' : 'good';
+      tr.appendChild(td);
+    });
+    t.appendChild(tr);
+  });
+  $('#out').value = o.md + '\n' + o.json + '\n';
+  bench.markdown = o.md;
+}
+async function copyOut() {
+  var txt = $('#out').value;
+  try { await navigator.clipboard.writeText(txt); $('#copied').textContent = 'copied'; }
+  catch (e) { var ta = $('#out'); ta.focus(); ta.select(); try { document.execCommand('copy'); $('#copied').textContent = 'copied'; } catch (e2) { $('#copied').textContent = 'select the text below and copy it'; } }
+}
+var wake = null;
+async function wakeLock(on) {
+  try { if (on && navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); else if (wake) { await wake.release(); wake = null; } } catch (e) { }
+}
+var running = false;
+function stop() { if (running) { abortFlag = true; status('stopping...'); } }
+canvas.addEventListener('pointerdown', stop);
+addEventListener('keydown', function (e) { if (e.key === 'Escape') stop(); });
+
+async function runSweep() {
+  if (running || lost) return; running = true; abortFlag = false;
+  $('#p-ctl').classList.add('hidden'); $('#p-info').classList.add('hidden'); $('#p-res').classList.add('hidden');
+  await wakeLock(true);
+  try {
+    var base = baseCfg(); cfg = base; buildState(base.state); buildSized(base);
+    status('measuring display refresh...');
+    INFO.displayMs = +(await displayInterval()).toFixed(2);
+    var list = sweepList(base), results = [], frames = +(Q.get('frames') || $('#o-frames').value);
+    var opts = { frames: frames, maxMs: +(Q.get('maxms') || 4000), forceSync: $('#o-sync').checked, alsoSync: false };
+    for (var i = 0; i < list.length && !abortFlag; i++) {
+      var c = list[i]; opts.label = (i + 1) + '/' + list.length + ' ' + nlab(c.n) + ' bloom ' + (c.bloom ? 'on' : 'off') + ' J' + c.jacobi + (c.prim === 'quads' ? ' quads' : '');
+      var r = await runConfig(c, opts);
+      if (r && r.hidden) { status('tab hidden: waiting to redo config ' + opts.label); while (document.hidden && !abortFlag) await idle(250); i--; continue; }
+      if (r) { results.push(r); bench.results = results; console.log('[bench] ' + opts.label + ' rAF ' + fmt(r.raf.p50) + ' gpu ' + fmt(r.gpu) + ' (' + r.src + ')'); }
+    }
+    renderTable(results);
+    $('#p-res').classList.remove('hidden'); $('#p-info').classList.remove('hidden');
+    $('#status').classList.remove('on'); window.scrollTo(0, 0);
+    console.log('[bench] RESULT\n' + bench.markdown);
+  } catch (e) { fail(String(e && e.stack || e)); }
+  await wakeLock(false);
+  running = false; bench.done = true; abortFlag = false;
+}
+async function live() {
+  if (running || lost) return; running = true; abortFlag = false;
+  $('#p-ctl').classList.add('hidden'); $('#p-info').classList.add('hidden');
+  try {
+    var c = baseCfg(); c.n = 131072; cfg = c; buildState(c.state); buildSized(c);
+    var last = null, d = [];
+    while (!abortFlag) {
+      var ts = await raf(); if (last !== null) { d.push(ts - last); if (d.length > 60) d.shift(); } last = ts;
+      frame(false);
+      if (frameNo % 15 === 0) status('live 131k, bloom on, J8 | rAF p50 ' + fmt(stats(d).p50, 1) + ' ms (' + fmt(1000 / stats(d).p50, 0) + ' fps) | ' + R.W + 'x' + R.H + ' | tap to stop');
+    }
+  } catch (e) { fail(String(e && e.stack || e)); }
+  $('#status').classList.remove('on'); $('#p-ctl').classList.remove('hidden'); $('#p-info').classList.remove('hidden');
+  running = false; abortFlag = false;
+}
+$('#b-run').addEventListener('click', runSweep);
+$('#b-live').addEventListener('click', live);
+$('#b-copy').addEventListener('click', copyOut);
+$('#b-again').addEventListener('click', function () { $('#p-res').classList.add('hidden'); $('#p-ctl').classList.remove('hidden'); });
+
+try { buildState($('#o-state').value); buildSized(baseCfg()); } catch (e) { fail(String(e.message || e)); return; }
+renderInfo();
+$('#hint').textContent = INFO.timerQuery ? 'GPU timer available' : 'no GPU timer: sync timing (slower sweep)';
+// draw one frame so the canvas is not empty
+cfg = baseCfg(); frame(false);
+console.log('[bench] ready | ' + INFO.unmaskedRenderer + ' | dpr ' + INFO.dpr + ' | timer ' + INFO.timerQuery + ' | compile ' + INFO.compileLinkMs + ' ms');
+if (Q.get('auto') === '1') setTimeout(runSweep, 300);
+})();
+</script>
+</body>
+</html>

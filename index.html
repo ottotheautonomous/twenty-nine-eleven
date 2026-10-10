@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#060b0d" />
+  <meta name="theme-color" content="#06080B" />
   <meta name="description" content="Twenty Nine Eleven. Security, networks, access control and cameras. CNC, fabrication, applied AI, computer vision, software, creative production and design." />
   <meta property="og:title" content="Twenty Nine Eleven — Security & bespoke technology" />
   <meta property="og:description" content="Security and bespoke technology. CNC, fabrication, AI, software, creative production and design. Start a conversation." />
@@ -14,22 +14,11 @@
 </head>
 <body>
   <canvas id="world" class="world" aria-hidden="true"></canvas>
+  <div class="readouts" aria-hidden="true"></div>
   <main class="scene" aria-labelledby="company-name">
     <div class="stage">
       <div class="mark-anchor" aria-hidden="true">
-        <svg class="mark-still" viewBox="26 30 148 200" fill="none" focusable="false">
-          <defs>
-            <radialGradient id="mark-dawn" cx="100" cy="150" r="78" gradientUnits="userSpaceOnUse"><stop stop-color="#ffd9a3" stop-opacity=".6"/><stop offset=".55" stop-color="#ffb866" stop-opacity=".12"/><stop offset="1" stop-color="#ffb866" stop-opacity="0"/></radialGradient>
-            <linearGradient id="mark-shaft" x1="0" y1="230" x2="0" y2="290" gradientUnits="userSpaceOnUse"><stop stop-color="#ffd9a3" stop-opacity=".2"/><stop offset="1" stop-color="#ffd9a3" stop-opacity="0"/></linearGradient>
-            <linearGradient id="mark-face" x1="0" y1="30" x2="0" y2="230" gradientUnits="userSpaceOnUse"><stop stop-color="#1e3034"/><stop offset=".6" stop-color="#111c1f"/><stop offset="1" stop-color="#0c1417"/></linearGradient>
-            <clipPath id="mark-open"><path d="M43 230V104A57 57 0 0 1 157 104V230Z"/></clipPath>
-          </defs>
-          <rect x="26" y="30" width="148" height="200" fill="url(#mark-dawn)" clip-path="url(#mark-open)"/>
-          <path d="M43 230L-10 290H210L157 230Z" fill="url(#mark-shaft)"/>
-          <path fill-rule="evenodd" fill="url(#mark-face)" stroke="#cfe0db" stroke-opacity=".8" stroke-width="1.2" d="M26 30H174V230H26Z M43 230V104A57 57 0 0 1 157 104V230Z"/>
-          <path d="M43 230V104A57 57 0 0 1 157 104V230" fill="none" stroke="#ffd9a3" stroke-opacity=".55" stroke-width="1"/>
-          <path d="M-20 246H220" stroke="#7fa09b" stroke-opacity=".22"/>
-        </svg>
+        <img class="mark-still" src="/sentinel-still.webp" alt="" width="760" height="760" decoding="async" />
       </div>
       <h1 id="company-name" aria-label="Twenty Nine Eleven">
         <span class="name-mask" aria-hidden="true"><span class="name-word">TWENTY</span></span>
@@ -39,19 +28,19 @@
       </h1>
       <p class="work-type" data-enter data-react="work">Security <span class="work-amp">&amp;</span> bespoke technology</p>
       <ul class="services services-primary" aria-label="Security and infrastructure">
-        <li><span class="service" data-react="service" data-service="Penetration testing"><span class="service-full">Penetration testing</span><span class="service-short">Pentesting</span></span></li>
-        <li><span class="service" data-react="service" data-service="Networks">Networks</span></li>
-        <li><span class="service" data-react="service" data-service="Access control"><span class="service-full">Access control</span><span class="service-short">Access</span></span></li>
-        <li><span class="service" data-react="service" data-service="Cameras">Cameras</span></li>
+        <li><span class="service" data-row="1" data-class="PT" data-service="Penetration testing"><span class="service-full">Penetration testing</span><span class="service-short">Pentesting</span></span></li>
+        <li><span class="service" data-row="1" data-class="NET" data-service="Networks">Networks</span></li>
+        <li><span class="service" data-row="1" data-class="ACC" data-service="Access control"><span class="service-full">Access control</span><span class="service-short">Access</span></span></li>
+        <li><span class="service" data-row="1" data-class="CAM" data-service="Cameras">Cameras</span></li>
       </ul>
       <ul class="services services-secondary" aria-label="Fabrication, intelligence and creative work">
-        <li><span class="service" data-react="service" data-service="CNC">CNC</span></li>
-        <li><span class="service" data-react="service" data-service="Fabrication"><span class="service-full">Fabrication</span><span class="service-short">Fab</span></span></li>
-        <li><span class="service" data-react="service" data-service="Applied AI"><span class="service-full">Applied AI</span><span class="service-short">AI</span></span></li>
-        <li><span class="service" data-react="service" data-service="Computer vision"><span class="service-full">Computer vision</span><span class="service-short">Vision</span></span></li>
-        <li><span class="service" data-react="service" data-service="Software"><span class="service-full">Software</span><span class="service-short">Code</span></span></li>
-        <li><span class="service" data-react="service" data-service="Creative production"><span class="service-full">Creative production</span><span class="service-short">Media</span></span></li>
-        <li><span class="service" data-react="service" data-service="Design">Design</span></li>
+        <li><span class="service" data-row="2" data-service="CNC">CNC</span></li>
+        <li><span class="service" data-row="2" data-service="Fabrication"><span class="service-full">Fabrication</span><span class="service-short">Fab</span></span></li>
+        <li><span class="service" data-row="2" data-service="Applied AI"><span class="service-full">Applied AI</span><span class="service-short">AI</span></span></li>
+        <li><span class="service" data-row="2" data-service="Computer vision"><span class="service-full">Computer vision</span><span class="service-short">Vision</span></span></li>
+        <li><span class="service" data-row="2" data-service="Software"><span class="service-full">Software</span><span class="service-short">Code</span></span></li>
+        <li><span class="service" data-row="2" data-service="Creative production"><span class="service-full">Creative production</span><span class="service-short">Media</span></span></li>
+        <li><span class="service" data-row="2" data-service="Design">Design</span></li>
       </ul>
       <div class="contact-trigger-shell" data-enter>
         <button id="open-contact" class="contact-trigger" data-react="contact" type="button" aria-haspopup="dialog" aria-controls="contact-dialog" disabled>
@@ -67,6 +56,7 @@
   <button class="motion-toggle" type="button" aria-label="Pause motion" aria-pressed="false" title="Pause motion" hidden>
     <svg viewBox="0 0 20 20" aria-hidden="true"><path id="motion-icon" d="M7 5v10M13 5v10" /></svg>
   </button>
+  <p class="instrument" aria-hidden="true"><span class="instrument-key">PERIMETER //</span><span class="instrument-integrity"><span class="instrument-label">INTEGRITY</span> <span class="instrument-value">0.998</span></span><span class="instrument-state">STANDBY</span><span class="instrument-findings"></span></p>
   <div class="veil" aria-hidden="true"></div>
   <dialog id="contact-dialog" class="contact-dialog" aria-labelledby="contact-title">
     <div class="dialog-surface">

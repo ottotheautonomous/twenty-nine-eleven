@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: 0BSD
+// Cursor scan-trail ping-pong (fragment, GLSL ES 3.00), the input that
+// lattice.glsl quantizes. Kit original, Twenty Nine Eleven (2026), written from
+// the igloo.inc "mouse frost" behaviour in research-igloo-techniques.md 3.4:
+// grow by 4-neighbour max, line splat prev->current, decay .985 per 60 Hz frame,
+// R = value, G = rim (leading edge), B = smoothed rim.
+// Target: RGBA16F at 1/4-1/5 of canvas resolution, LINEAR filtering.
+// JS each frame: uRadius = 0.05 * smoothstep(0.1, 1.0, pointerVelocity) (in
+// units of height; zero when still, so a resting cursor paints nothing);
+// uDecay = pow(0.985, ratio); reset uA = uB after >150 ms idle or a jump > 0.3.
+in vec2 vUv;
+uniform sampler2D uPrev;
+uniform vec2 uA, uB;         // previous / current pointer, UV
+uniform float uRadius;       // see above
+uniform float uAspect;       // width / height
+uniform float uDecay;        // pow(0.985, ratio)
+uniform float uGrow;         // 1.0 = full max-dilation each frame; 0.0 = none
+uniform float uTime;
+out vec4 o;
+float capsule(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy), s = textureSize(uPrev, 0);
+  // organic creep: tiny time-varying offset instead of igloo's flow texture
+  vec2 px = 1.0 / vec2(s);
+  vec2 drift = vec2(sin(vUv.y * 23.0 + uTime * 0.7), cos(vUv.x * 19.0 - uTime * 0.6)) * px * 0.5;
+  vec4 prev = texture(uPrev, vUv + drift);
+  float n = max(max(texelFetch(uPrev, clamp(c + ivec2(1, 0), ivec2(0), s - 1), 0).r,
+                    texelFetch(uPrev, clamp(c - ivec2(1, 0), ivec2(0), s - 1), 0).r),
+                max(texelFetch(uPrev, clamp(c + ivec2(0, 1), ivec2(0), s - 1), 0).r,
+                    texelFetch(uPrev, clamp(c - ivec2(0, 1), ivec2(0), s - 1), 0).r));
+  float grown = mix(prev.r, max(prev.r, n), uGrow);
+  vec2 asp = vec2(uAspect, 1.0);
+  float k = clamp(1.0 - capsule(vUv * asp, uA * asp, uB * asp) / max(uRadius, 1e-5), 0.0, 1.0);
+  k = uRadius > 1e-5 ? k * k * k : 0.0;
+  float v = min((grown + k) * uDecay, 1.0);
+  float rim = max(v - prev.r, 0.0);
+  o = vec4(v, rim, (prev.b + rim) * 0.9, 1.0);
+}

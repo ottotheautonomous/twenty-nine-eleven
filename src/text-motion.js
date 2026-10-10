@@ -1,7 +1,7 @@
 import { animate, stagger, hover } from 'motion';
 
 // Keep hit areas and row geometry stationary; only the ink and light move.
-export function createTextMotion(elements, { canAnimate, compact = () => innerWidth <= 600 } = {}) {
+export function createTextMotion(elements, { canAnimate, compact = () => innerWidth <= 600, onActive = null } = {}) {
   const records = new Map();
   const separators = new Map();
   const cleanups = [];
@@ -88,11 +88,11 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     record.dots.forEach(dot => updateSeparator(dot, record.element, active, !spatial));
     record.active = active;
   }
-  function set(record, key, value) {
+  function set(record, key, value, event = null) {
     if (record[key] === value) return;
     record[key] = value;
     const active = record.hover || record.focus || record.touch;
-    if (active !== record.active) render(record);
+    if (active !== record.active) { render(record); onActive?.(record.element, active, event); }
   }
 
   for (const element of elements) {
@@ -122,8 +122,8 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     cleanups.push(hover(record.element, (_, event) => {
       const rect = record.element.getBoundingClientRect();
       record.origin = event.clientX < rect.left + rect.width / 2 ? '0% 50%' : '100% 50%';
-      set(record, 'hover', true);
-      return () => set(record, 'hover', false);
+      set(record, 'hover', true, event);
+      return () => set(record, 'hover', false, null);
     }));
     const focusTarget = record.element.matches('label[for]') ? document.getElementById(record.element.htmlFor) : record.element.closest('button') || record.element;
     const focus = () => { record.origin = '50% 50%'; set(record, 'focus', true); };

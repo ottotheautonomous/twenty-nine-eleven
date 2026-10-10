@@ -1,0 +1,179 @@
+Twenty Nine Eleven — third-party notices for the scene code in src/scene/
+================================================================================
+Minifiers strip comments from the shipped GLSL and JavaScript, so this file is the licence of record.
+Files lifted from the Twenty Nine Eleven kit carry 0BSD; derived files are listed with their upstream licence.
+
+
+--------------------------------------------------------------------------------
+0BSD-kit-original.txt
+--------------------------------------------------------------------------------
+Files marked "SPDX-License-Identifier: 0BSD" were written for this kit
+(Twenty Nine Eleven, 2026). Zero-Clause BSD:
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT-Dobryakov-WebGL-Fluid-Simulation.txt
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2017 Pavel Dobryakov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT-atyuwen-bitangent_noise.txt
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2021 Yuwen Wu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT-Inigo-Quilez-SDF.txt
+--------------------------------------------------------------------------------
+The MIT License
+Copyright (c) 2013 Inigo Quilez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Provenance note (kit maintainer): iquilezles.org/articles/distfunctions and
+/articles/smin carry no licence line on the page itself (checked 2026-10-09).
+The MIT grant above is the header of Quilez's reference shader "Raymarching -
+Primitives" (https://www.shadertoy.com/view/Xds3zN), as reproduced by a
+crediting port (https://codepen.io/kynd/pen/dyxzyjV), plus his published
+policy (quoted in search results, no longer on the home page) that code on his
+site or Shadertoy account "that implements an algorithm is under the MIT
+license". The same primitives are also available, with an explicit MIT option,
+in Mercury's hg_sdf (see MIT-Mercury-hg_sdf.txt).
+
+--------------------------------------------------------------------------------
+MIT-Mercury-hg_sdf.txt
+--------------------------------------------------------------------------------
+/////
+
+MIT License
+
+Copyright (c) 2011-2021 Mercury Demogroup
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+/////
+
+//////////////////////////////////////////////////////////////
+
+How to use this:
+
+1. Build some system to #include glsl files in each other.
+
+--------------------------------------------------------------------------------
+Zlib-pmndrs-postprocessing.txt
+--------------------------------------------------------------------------------
+Copyright © 2015 Raoul van Rüschen
+
+This software is provided 'as-is', without any express or implied warranty. In
+no event will the authors be held liable for any damages arising from the use of
+this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject to
+the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim
+   that you wrote the original software. If you use this software in a product,
+   an acknowledgment in the product documentation would be appreciated but is
+   not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+
+ALTERED SOURCE NOTICE: src/scene/bloom.js contains altered versions of pmndrs/postprocessing's downsampling and upsampling convolution shaders and luminance threshold, ported to GLSL ES 3.00 without three.js, with tap offsets computed in the fragment shader and the threshold merged into a Karis-averaged prefilter.
+
+--------------------------------------------------------------------------------
+CC0-Christoph-Peters-blue-noise.txt
+--------------------------------------------------------------------------------
+To the extent possible under law, Christoph Peters has waived all copyright and 
+related or neighboring rights to the files in this directory and its 
+subdirectories. This work is published from: Germany. 
+
+The work is made available under the terms of the Creative Commons CC0 Public 
+Domain Dedication.
+
+For more information please visit:
+https://creativecommons.org/publicdomain/zero/1.0/
