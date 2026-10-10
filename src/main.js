@@ -267,12 +267,8 @@ scene.addEventListener('pointerdown', event => {
   visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse', target);
   if (still() || !entered || event.target.closest('button, a, input, textarea')) return;
   const [nx, ny] = toNdc(event.clientX, event.clientY);
-  down = { x: event.clientX, y: event.clientY, t: event.timeStamp, touch: event.pointerType === 'touch' };
+  down = { x: event.clientX, y: event.clientY, t: event.timeStamp, touch: event.pointerType === 'touch' };   // a click has no animation of its own (owner's call); a touch tap still reads
   model.pointer(nx, ny, event.timeStamp);
-  model.press(nx, ny);
-  // A press: the whole perimeter flinches outward for one beat and the ember flares.
-  animate(uniforms, { u_flinch: [1, 0] }, { type: 'spring', stiffness: 400, damping: 24 });
-  boost('u_boostPress', .4, .6);
 }, { passive: true });
 scene.addEventListener('pointerup', event => {
   if (down && down.touch && !still() && event.timeStamp - down.t < 250 && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 8) {
