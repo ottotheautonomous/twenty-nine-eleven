@@ -1,11 +1,10 @@
 import { animate, stagger, hover } from 'motion';
 
 // Keep hit areas and row geometry stationary; only the ink and light move.
-export function createTextMotion(elements, { canAnimate, compact = () => innerWidth <= 600, onActive = null } = {}) {
+export function createTextMotion(elements, { canAnimate, onActive = null } = {}) {
   const records = new Map();
   const separators = new Map();
   const cleanups = [];
-  const spring = { type: 'spring', stiffness: 330, damping: 28 };
 
   function stop(record) { record.controls.forEach(control => control.stop()); record.controls = []; }
   function immediate(element, values) {
@@ -58,8 +57,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
     record.element.dataset.textActive = String(active);
     const labels = visibleLabels(record);
     const chars = labels.flatMap(label => [...label.querySelectorAll('.motion-char')]);
-    // The text never changes size: the response is the letter wave, the warm light and the underline.
-    const lift = active && spatial ? (compact() ? -1.8 : -2.6) : 0;
+    // The text never moves or changes size: the response is light alone. A warm wave runs letter by letter, then the underline.
     if (spatial) {
       for (const hidden of record.labels.filter(label => !labels.includes(label))) {
         record.controls.push(immediate(hidden, { scale: 1 }));
@@ -67,10 +65,9 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
       }
       for (const label of labels) {
         const letters = [...label.querySelectorAll('.motion-char')];
-        record.controls.push(animate(letters, { y: lift, color: active ? '#ffe9c4' : record.colors.get(label) }, {
-          ...spring,
+        record.controls.push(animate(letters, { color: active ? '#ffe9c4' : record.colors.get(label) }, {
+          duration: active ? .24 : .2, ease: 'easeOut',
           delay: active ? stagger(Math.min(.012, .1 / Math.max(1, chars.length - 1))) : 0,
-          color: { duration: active ? .24 : .2, ease: 'easeOut' },
         }));
       }
     } else {
