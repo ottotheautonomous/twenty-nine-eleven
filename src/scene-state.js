@@ -12,6 +12,7 @@ export const uniforms = {
   u_yaw: { value: 0 }, u_pitch: { value: 0 }, u_tear: { value: 0 }, u_present: { value: 0 },
   u_probeRX: { value: 0 }, u_probeRY: { value: 0 }, u_probeRZ: { value: 0 },   // the hand: raw probe, its world velocity, and a poke
   u_pokeX: { value: 0 }, u_pokeY: { value: 0 }, u_pokeZ: { value: 0 }, u_poke: { value: 0 },
+  u_handDX: { value: 0 }, u_handDY: { value: 0 }, u_handDZ: { value: -1 },     // unit view ray through the raw probe (eye -> probe)
   // bound values
   u_engage: { value: 0 }, u_idle: { value: 0 },
   // entrance

@@ -1,6 +1,6 @@
 import { frameRatio, damp, friction, smoothstep, clamp } from './damp.js';
 import { projectPx } from './camera.js';
-import { hexRGB, COLORS, NODES, LAG } from './constants.js';
+import { hexRGB, COLORS, NODES, LAG, HAND } from './constants.js';
 
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
@@ -99,7 +99,8 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     s.trail.pressDisc = false;
     // ---- simulate (same force model as the GL sim, scalar) ----
     const P = s.probeRaw, k06 = damp(LAG.particle, ratio), build = u.u_build.value, open = u.u_open.value, flinch = u.u_flinch.value;
-    const PR = s.probeRaw, PV = s.probeVel, poke = s.poke;   // the hand
+    const PR = s.probeRaw, PV = s.probeVel, poke = s.poke, HD = s.handDir;   // the hand (measured across the view ray HD)
+    const handW = (al) => 1 + (HAND.back - 1) * smoothstep(-0.2, 0.2, al);   // near face 1, far side HAND.back
     const tight = u.u_tight.value, idleU = u.u_idle.value, fr = friction(0.9, ratio), sim = motion && s.simulate;
     const view4 = cam.view, VP = cam.viewProj, right = cam.right, up = cam.up, L = cam.lightDir;
     const ringLon = u.u_ringLon.value, ringPhase = u.u_ringPhase.value, ringAmp = u.u_ringAmp.value;
@@ -128,12 +129,14 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
         const gi = gridAt(su, sv), fxv = G.vx[gi], fyv = G.vy[gi], fl = Math.min(Math.hypot(fxv, fyv), 1);
         const tr = model.trailGrid.at(su, sv);
         let ax = (right[0] * fxv + up[0] * fyv) * 7e-4, ay = (right[1] * fxv + up[1] * fyv) * 7e-4, az = (right[2] * fxv + up[2] * fyv) * 7e-4;
-        // the hand: an instant, velocity-weighted shove (2x GL: this tier's spring is 6x stiffer and fights the kick)
+        // the hand: an instant, velocity-weighted shove in the view plane, away from the pointer (same gains as GL: this
+        // tier's 6x spring stands in for GL's tube attraction)
         if (poke > 1e-3) {
-          const hx_ = px - PR[0], hy_ = py - PR[1], hz_ = pz - PR[2], hd = Math.hypot(hx_, hy_, hz_) || 1e-3;
-          let hk = 1 - smoothstep(0, 0.55, hd); hk *= hk; const hand = poke * hk;
-          const sh = hand * 2.4e-3, dr = hand * 6e-4;
-          ax += hx_ / hd * sh + PV[0] * dr; ay += hy_ / hd * sh + PV[1] * dr; az += hz_ / hd * sh + PV[2] * dr;
+          const dx_ = px - PR[0], dy_ = py - PR[1], dz_ = pz - PR[2], al = dx_ * HD[0] + dy_ * HD[1] + dz_ * HD[2];
+          const qx = dx_ - HD[0] * al, qy = dy_ - HD[1] * al, qz = dz_ - HD[2] * al, hd = Math.max(Math.hypot(qx, qy, qz), 1e-3);
+          let hk = 1 - smoothstep(0, HAND.radius, hd); hk *= hk * handW(al); const hand = poke * poke * hk * (1 + HAND.spread * (2 * r - 1));   // squared as in SIM_FS
+          const sh = hand * HAND.shove, dr = hand * HAND.drag;
+          ax += qx / hd * sh + PV[0] * dr; ay += qy / hd * sh + PV[1] * dr; az += qz / hd * sh + PV[2] * dr;
         }
         const sw = 2e-4 * (1 - 0.5 * tight) * (0.7 + 0.3 * r);
         ax += Math.sin(py * 7 + time * (1 + 0.7 * r)) * sw; ay += Math.sin(pz * 7 + time * 0.8) * sw; az += Math.sin(px * 7 - time * 0.6) * sw;
@@ -168,7 +171,10 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const lit = 0.25 + 0.75 * diff;
       let tn = lit < 0.35 ? 0 : lit < 0.62 ? 1 : 2;
       let touch = 0;
-      if (poke > 1e-3) { let hk2 = 1 - smoothstep(0, 0.6, Math.hypot(px - PR[0], py - PR[1], pz - PR[2])); hk2 *= hk2; touch = poke * hk2; }
+      if (poke > 1e-3) {
+        const dx_ = px - PR[0], dy_ = py - PR[1], dz_ = pz - PR[2], al = dx_ * HD[0] + dy_ * HD[1] + dz_ * HD[2];
+        let hk2 = 1 - smoothstep(0, 1.1 * HAND.radius, Math.hypot(dx_ - HD[0] * al, dy_ - HD[1] * al, dz_ - HD[2] * al)); hk2 *= hk2 * handW(al); touch = poke * hk2;
+      }
       if (speed > 0.004 || tr2 > 0.25 || d2[i] > 0.45 || touch > 0.3) tn = 3;
       // perspective size: nearer sprites larger; energy-conserving intensity
       const depth = w > 0 ? cam.dist / w : 1;
