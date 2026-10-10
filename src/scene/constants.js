@@ -16,6 +16,12 @@ export const LAG = { poke: 0.85, wake: 0.955, pointer: 0.05, orbit: 0.05, partic
 export const EXPOSURE = { gain: 1.8, velPenalty: 0.6, decay: 0.992, show: 0.35, hide: 0.315 };
 export const ORBIT = { yaw: 0.11, pitch: 0.04, shake: 0.008, idle: 0.026 };   // radians
 export const EMBER = { coreR: 0.045, haloR: 0.42, hdr: 3.0, halo: 0.25, offset: 0.08 };   // in R
+// The ember is a light INSIDE the cage. light: its colour added to a grain's lit face (x emberLevel x the falloff); reach: view-plane
+// sigma (R) of that light, so the cage outside the halo stays cold silver; falloff: radius (R) of the 1/(1+(d/falloff)^2) term (at rest
+// every strut sits 1 R away: only a scattered particle that comes close flares); split: depth softness (R) of "nearer than the ember"
+// (only those particles cover it); occCore/occHalo: the most a front strut takes from the core / the halo (the rest of the halo is the
+// glow in the air in front of the strut: never cut); veil: the Canvas2D tier's erase under a front sprite.
+export const EMBER_LIGHT = { light: 0.9, reach: 0.32, falloff: 1.0, split: 0.15, occCore: 0.85, occHalo: 0.45, veil: 0.6 };
 export const TIMING = { greet: 0.6, lose: 1.5, tier0Dwell: 0.4, tier0Radius: 0.3, sentryEvery: 9, sentryDur: 2.5, idleAfter: 4 };
 // Integrity is a ledger. Under the hand the deficit only grows: a capped live reading of the trail (soft-saturating) or the
 // damage accrued while the hand paints (rate acc, saturating), never below floor. After `quiet` s with no painting the reset

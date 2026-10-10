@@ -1,10 +1,11 @@
 import { frameRatio, damp, friction, smoothstep, clamp } from './damp.js';
 import { projectPx } from './camera.js';
-import { hexRGB, COLORS, NODES, LAG, HAND, RESET } from './constants.js';
+import { hexRGB, COLORS, NODES, LAG, HAND, RESET, EMBER_LIGHT } from './constants.js';
 
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
 const TONES = [COLORS.shadow, COLORS.mid, COLORS.hi, COLORS.rim].map(hexRGB);
+TONES.push(TONES[2].map((c, i) => c + (hexRGB(COLORS.ember)[i] - c) * 0.45));   // 4: silver in the ember's light (hi toward ember: no new colour)
 const RADII = [2.0, 3.0, 4.0];                       // CSS px (v1's sizes, hard-cored); multiplied by the backing scale
 const BUCKETS = [0.05, 0.1, 0.18, 0.28, 0.38];         // globalAlpha per intensity bucket
 
@@ -25,10 +26,10 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   if (!ctx) return null;
   const maxN = Math.min(tier.sprites || 2000, shape.count);
   let N = maxN;
-  let ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten, tone, sizeIdx;
+  let ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten, tone, sizeIdx, veil;
   function alloc() {
     [ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten] = Array.from({ length: 12 }, () => new Float32Array(N));
-    tone = new Uint8Array(N); sizeIdx = new Uint8Array(N);
+    tone = new Uint8Array(N); sizeIdx = new Uint8Array(N); veil = new Uint8Array(N);
   }
   alloc();
   const G = { w: 32, h: 18, vx: new Float32Array(32 * 18), vy: new Float32Array(32 * 18), tx: new Float32Array(32 * 18), ty: new Float32Array(32 * 18) };
@@ -109,6 +110,8 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     const tapT = u.u_tapT.value, tapX = u.u_tapX.value, tapY = u.u_tapY.value, tapZ = u.u_tapZ.value, sentry = u.u_sentry.value;
     const KEY = cam.lightDir;
     const dens = 2000 / N;                              // luminance stays put as the sprite count changes
+    const lvl = emberLevel(u, time) * (0.55 + 0.45 * model.trailGrid.maxAround(cam.emberPx[0], cam.emberPx[1], W, H));   // the ember's level (a tear lets the warmth out)
+    const EV = cam.emberView, eReach2 = EMBER_LIGHT.reach * EMBER_LIGHT.reach, eFall2 = EMBER_LIGHT.falloff * EMBER_LIGHT.falloff, eGain = EMBER_LIGHT.light * Math.min(lvl, 1.2);
     for (let i = 0; i < N; i++) {
       const hx = shape.homes[i * 4], hy = shape.homes[i * 4 + 1], hz = shape.homes[i * 4 + 2], r = shape.homes[i * 4 + 3];
       // build-inward front in view space
@@ -195,6 +198,14 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
       inten[i] = 0.95 * dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch) * (1 + 0.5 * head);
+      // the ember inside the cage (as RENDER_FS): a sprite behind it shows its lit face and takes its tone; one in front catches a
+      // quarter (its rim) and veils the source
+      const vxp = view4[0] * px + view4[4] * py + view4[8] * pz + view4[12] - EV[0], vyp = view4[1] * px + view4[5] * py + view4[9] * pz + view4[13] - EV[1];
+      const vzp = view4[2] * px + view4[6] * py + view4[10] * pz + view4[14] - EV[2], rho2 = vxp * vxp + vyp * vyp, nearer = vzp > 0;
+      const eL = eGain * Math.exp(-rho2 / eReach2) / (1 + (rho2 + vzp * vzp) / eFall2) * (nearer ? 0.25 : 1);
+      if (tn < 3 && eL > 0.06) tn = 4;
+      inten[i] *= 1 + 1.2 * eL;
+      veil[i] = nearer && rho2 < 0.25 ? 1 : 0;   // in front and within 0.5 R of the ember in the view plane
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----
@@ -203,20 +214,28 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     const ctx = lctx;                                   // block-scoped: the emissive layer
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, W, H);
-    // ember under the sprites: a tear lets the warmth out
+    // the ember: the source (core + the back half of the halo), veiled only by sprites NEARER than it; the halo's front half is the
+    // air between the camera and everything, painted over the veil. Sprites behind it are painted later and only add.
     const ex = cam.emberPx[0], ey = H - cam.emberPx[1], er = cam.emberR;
-    const lvl = emberLevel(u, time) * (0.55 + 0.45 * model.trailGrid.maxAround(cam.emberPx[0], cam.emberPx[1], W, H));
     if (lvl > 0.001) {
-      const warm = u.u_warm.value;
-      const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
-      const a = Math.min(1, lvl);
+      const warm = u.u_warm.value, a = Math.min(1, lvl), air = 0.5;
+      let g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
       g.addColorStop(0, `rgba(255,${Math.round(226 + 10 * warm)},${Math.round(186 + 10 * warm)},${a})`);
       g.addColorStop(0.04, `rgba(255,216,166,${0.9 * a})`);
-      g.addColorStop(0.12, `rgba(240,166,94,${0.35 * a})`);
-      g.addColorStop(0.3, `rgba(240,166,94,${0.08 * a})`);
+      g.addColorStop(0.12, `rgba(240,166,94,${0.35 * a * (1 - air)})`);
+      g.addColorStop(0.3, `rgba(240,166,94,${0.08 * a * (1 - air)})`);
       g.addColorStop(1, 'rgba(240,166,94,0)');
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = g; ctx.fillRect(ex - er * 1.6, ey - er * 1.6, er * 3.2, er * 3.2);
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(ex - er * 1.6, ey - er * 1.6, er * 3.2, er * 3.2);
+      ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = EMBER_LIGHT.veil;   // soft, never a black cut
+      for (let i = 0; i < N; i++) { if (!veil[i] || sz[i] <= 0 || inten[i] < 0.02) continue; const sp = sprites[sizeIdx[i]][0], half = sp.width / 2; ctx.drawImage(sp, sx[i] - half, sy[i] - half); }
+      ctx.globalAlpha = 1;
+      g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
+      g.addColorStop(0, 'rgba(240,166,94,0)');
+      g.addColorStop(0.04, 'rgba(240,166,94,0)');
+      g.addColorStop(0.12, `rgba(240,166,94,${0.35 * a * air})`);
+      g.addColorStop(0.3, `rgba(240,166,94,${0.08 * a * air})`);
+      g.addColorStop(1, 'rgba(240,166,94,0)');
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(ex - er * 1.6, ey - er * 1.6, er * 3.2, er * 3.2);
     }
     ctx.globalCompositeOperation = 'lighter';
     for (let b = 0; b < BUCKETS.length; b++) {

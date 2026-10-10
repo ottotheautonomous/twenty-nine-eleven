@@ -5,7 +5,7 @@ import { createBloom } from './bloom.js';
 import { loadBlueNoise, blueNoiseOffset } from './bluenoise.js';
 import { createPlexusRenderer } from './plexus.js';
 import { frameRatio } from './damp.js';
-import { COLORS, NODES, RESET, hexRGB, linearRGB } from './constants.js';
+import { COLORS, NODES, RESET, EMBER_LIGHT, hexRGB, linearRGB } from './constants.js';
 import bnUrl from './bn64-rgb.png?url';
 import noiseSrc from './glsl/noise.glsl?raw';
 import sdfSrc from './glsl/sdf.glsl?raw';
@@ -180,6 +180,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform3fv(p.uEmberCol, colors.ember); gl.uniform3fv(p.uEmberHot, colors.hot);
     gl.uniform1f(p.uLevel, emberLevel(u, time)); gl.uniform1f(p.uFlicker, 0.08 * (1 - u.u_build.value));
     gl.uniform1f(p.uWarmMix, u.u_warm.value); gl.uniform1f(p.uTime, time % 1000); gl.uniform2f(p.uInvRes, 1 / W, 1 / H);
+    gl.uniform2f(p.uOcc, EMBER_LIGHT.occCore, EMBER_LIGHT.occHalo);
     gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, x1 - x0, y1 - y0);
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -224,10 +225,15 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     particles.draw(cam, rows * tier.side[0], u, drawOpts(time));
     if (u.u_classAmp.value > 0.001) classNodes.draw(cam, u, (cam.scaleY || 1) * hdrScale);
     if (model.linkAlpha > 0.001) plexus.draw(shape.nodes, cam.viewProj, [0.84, 0.91, 0.97], HAIRLINE_HDR * model.linkAlpha * Math.max(1, (cam.scaleY || 1) * hdrScale / 1.25));   // 1-device-px lines: keep v1's light per link at native DPI
-    if (motion === 0) {   // a still has no previous frame with the same geometry: give the ember this frame's coverage
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, cur.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prev.fbo);
-      gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo);
+    {   // the ember reads THIS frame's coverage (a texture cannot be sampled while it is drawn into): copy the ember's box of cur into
+        // prev, which nothing else reads. The previous frame's coverage lagged moving particles by a frame (ghosts) and a still had none.
+      const sc = hdrScale, ex = cam.emberPx[0] * sc, ey = cam.emberPx[1] * sc, er = Math.max(1, cam.emberR * sc) * 3 + 2;
+      const bx0 = Math.max(0, Math.floor(ex - er)), by0 = Math.max(0, Math.floor(ey - er)), bx1 = Math.min(W, Math.ceil(ex + er)), by1 = Math.min(H, Math.ceil(ey + er));
+      if (bx1 > bx0 && by1 > by0) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, cur.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prev.fbo);
+        gl.blitFramebuffer(bx0, by0, bx1, by1, bx0, by0, bx1, by1, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo);
+      }
     }
     drawEmber(prev, cam, u, time);
     const bloomTex = bloom.render(cur.texture, W, H) || cur.texture;

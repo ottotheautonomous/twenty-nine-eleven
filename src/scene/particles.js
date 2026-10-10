@@ -5,7 +5,7 @@
 // precision); a third MRT attachment carries the cascaded proximity response,
 // the warm term and the build; the spring weakens under the trail; morphing removed.
 import { createProgram, bindTex, FULLSCREEN_VS } from './gl.js';
-import { LAG, HAND, RESET } from './constants.js';
+import { LAG, HAND, RESET, EMBER_LIGHT } from './constants.js';
 
 const SIM_FS = (noiseSrc, sdfSrc) => noiseSrc + sdfSrc + `
 in vec2 vUv;
@@ -85,7 +85,7 @@ void main() {
 
   float diff = max((dot(nrm, uLightDir) + uWrap) / (1.0 + uWrap), 0.0);
   float inside = d < 0.0 ? mix(0.35, 1.0, smoothstep(-0.12, 0.0, d)) : 1.0;
-  float warm = max(dot(nrm, -normalize(p + vec3(1e-5))), 0.0) * 0.6 * (1.0 - smoothstep(0.35, 0.75, length(hv.xy)));   // only struts near the ember's halo
+  float warm = max(dot(nrm, -normalize(p + vec3(1e-5))), 0.0) * 0.6 * (1.0 - smoothstep(0.35, 0.75, length(hv.xy)));   // warm: no longer read by the renderer (the ember's light is per fragment now); kept so the sim is unchanged
 
   oOff = vec4(p - home, diff * inside);
   oVel = vec4(v, mix(V.w, length(v), uSpeedLerp));
@@ -102,7 +102,9 @@ uniform float uSentry;       // idle sentry band phase 0..1; 0 = none
 uniform vec3 uKey;           // key light direction (sentry band origin)
 uniform vec3 uProbeRaw, uHandDir, uHand; uniform float uWake;   // the hand: instant light where it moves, ~0.85 s tail
 uniform vec3 uReset;         // the resync front (radius R, amp, band sigma): the tap's own light, as a ring leaving the ember
-out float vLight, vSpeed, vFade, vD2, vWarm, vBuilt, vBoost, vGrow;
+uniform vec3 uEmberView;     // the ember, view space
+uniform vec3 uEmberLit;      // (reach sigma R, depth-split softness R, 3D falloff radius R)
+out float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk; out vec3 vToE;
 void main() {
   int w = textureSize(uHome, 0).x;
   ivec2 c = ivec2(gl_VertexID % w, gl_VertexID / w);
@@ -132,13 +134,21 @@ void main() {
   float touch = uWake * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
   vBoost = 1.0 + 1.5 * (ring + tap) + 0.5 * wave + sentry + touch;   // the resync ring crosses the dense limb: x0.5 keeps it to <= 3 bloom blocks (A3)
   vGrow = grow;
-  vLight = O.w; vSpeed = V.w; vD2 = A.y; vWarm = A.z; vBuilt = A.w;
+  // The ember sits inside the cage. Only particles NEARER than it cover it (alpha = coverage, read by the ember pass), soft across
+  // +-split so a scattered particle crossing its depth never pops. It is also a point light: vToE the direction to it; vEk its reach,
+  // a view-plane gaussian (the cage outside the halo stays silver) over a 3D falloff (at rest every strut is 1 R away; only a
+  // scattered particle that comes close flares).
+  vOcc = smoothstep(-uEmberLit.y, uEmberLit.y, vp.z - uEmberView.z);
+  vec3 toE = uEmberView - vp.xyz; float dE = max(length(toE), 1e-4);
+  vToE = toE / dE;
+  vEk = exp(-dot(toE.xy, toE.xy) / (uEmberLit.x * uEmberLit.x)) / (1.0 + dE * dE / (uEmberLit.z * uEmberLit.z));
+  vLight = O.w; vSpeed = V.w; vD2 = A.y; vBuilt = A.w;
 }`;
 
 export const RENDER_FS = `
-in float vLight, vSpeed, vFade, vD2, vWarm, vBuilt, vBoost, vGrow;
+in float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk; in vec3 vToE;
 uniform vec3 uColDark, uColLight, uColFast, uEmberCol, uLightView;
-uniform float uIntensity, uWrapR, uEmberLevel, uEngage, uDim;
+uniform float uIntensity, uWrapR, uEmberLevel, uEmberLight, uEngage, uDim;
 uniform vec2 uFastRange, uBlurRange, uInvRes;
 uniform sampler2D uTrail;
 out vec4 o;
@@ -151,7 +161,9 @@ void main() {
   float lit = vLight * (0.55 + 0.45 * diff);
   vec3 col = mix(uColDark, uColLight, lit);
   col = mix(col, uColFast, smoothstep(uFastRange.x, uFastRange.y, vSpeed));
-  col = mix(col, uEmberCol, vWarm * vWarm * uEmberLevel * 0.25);
+  // the ember's light on the grain's sphere: behind the ember the face we see looks at it (a lit disc, brightest at its centre); in
+  // front of it only the rim that points inward catches it (a back-lit edge) and the body over the core stays cold
+  col += uEmberCol * (uEmberLight * uEmberLevel * vEk * max(dot(n, vToE), 0.0));
   vec3 tr = texture(uTrail, gl_FragCoord.xy * uInvRes).rgb;
   float front = min(1.0, tr.g * 2.5 + tr.b * 0.25);                   // igloo's front channel: a bright head, x0.9 per frame, gone in ~20 frames
   col += uColFast * (front + tr.r * 0.3);                             // the breach rim brightens the lattice; it does not scratch the ember
@@ -159,7 +171,7 @@ void main() {
   float a = (1.0 - 0.35 * smoothstep(uBlurRange.x, uBlurRange.y, vSpeed)) * vFade * vBuilt;   // moved particles stay visible
   a *= 1.0 - smoothstep(0.75, 1.0, r2);
   float energy = pow(1.0 / vGrow, 1.5);
-  o = vec4(col * a * uIntensity * vBoost * energy * (1.0 + 0.1 * uEngage), a);   // the modal dim is applied once, in the composite
+  o = vec4(col * a * uIntensity * vBoost * energy * (1.0 + 0.1 * uEngage), a * vOcc);   // alpha: coverage by the particles NEARER than the ember only; the modal dim is applied once, in the composite
 }`;
 
 export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256], state32 = false, homes, latticeRotT, shape = 0 }) {
@@ -258,6 +270,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3f(r.uReset, u.u_resetFront.value, u.u_resetAmp.value, RESET.band);
     gl.uniform3fv(r.uColDark, opts.colDark); gl.uniform3fv(r.uColLight, opts.colLight); gl.uniform3fv(r.uColFast, opts.colFast); gl.uniform3fv(r.uEmberCol, opts.ember);
     gl.uniform3fv(r.uLightView, cam.lightView);
+    gl.uniform3fv(r.uEmberView, cam.emberView); gl.uniform3f(r.uEmberLit, EMBER_LIGHT.reach, EMBER_LIGHT.split, EMBER_LIGHT.falloff); gl.uniform1f(r.uEmberLight, EMBER_LIGHT.light);
     gl.uniform1f(r.uIntensity, opts.intensity); gl.uniform1f(r.uWrapR, cfg.wrap); gl.uniform1f(r.uEmberLevel, opts.emberLevel);
     gl.uniform1f(r.uEngage, u.u_engage.value); gl.uniform1f(r.uDim, u.u_dim.value);
     gl.uniform2fv(r.uFastRange, cfg.fastRange); gl.uniform2fv(r.uBlurRange, cfg.blurRange); gl.uniform2f(r.uInvRes, opts.invRes[0], opts.invRes[1]);
