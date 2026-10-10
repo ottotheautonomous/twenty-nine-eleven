@@ -108,13 +108,12 @@ void main() {
   float flick = r < 0.08 ? 0.6 + 0.4 * sin(0.8 * uTime + 97.0 * r) * sin(1.73 * uTime + 31.0 * r) : 1.0;
 
   float grow = 1.0 + 0.3 * (ring + tap) + 0.12 * A.y;
-  float g = fract(r * 13.7);                                            // per-particle grain, fixed for life: sparks resolve against the bulk
-  float size = uSizeK / max(-vp.z, 1e-3) * grow * mix(0.7, 1.4, g);
+  float size = uSizeK / max(-vp.z, 1e-3) * grow;                       // one size for all: per-particle grain clumped the tube into blobs
   gl_PointSize = clamp(size, 1.0, uMaxPoint);
   vFade = clamp(size * size, 0.0, 1.0) * flick;
   float hk = 1.0 - smoothstep(0.0, 0.6, distance(p, uProbeRaw)); hk *= hk;
-  float touch = uPoke * hk;                                            // capped at +1: the tube stays under the bloom threshold
-  vBoost = (1.0 + 1.5 * (ring + tap) + sentry + touch) * mix(0.6, 1.5, g);
+  float touch = uPoke * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
+  vBoost = 1.0 + 1.5 * (ring + tap) + sentry + touch;
   vGrow = grow;
   vLight = O.w; vSpeed = V.w; vD2 = A.y; vWarm = A.z; vBuilt = A.w;
 }`;
@@ -154,7 +153,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
   };
   const cfg = {
     fluidPush: 7e-4, shove: 1.2e-3, drag: 3e-4, swirl: 0.7e-4, swirlFreq: 7.0, spring: 1e-3, attract: 9e-4, friction: 0.9, speedLerp: 0.035, wrap: 0.18, bound: 2.5,
-    sizePx: 1.6, intensity: 0.020, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],
+    sizePx: 1.6, intensity: 0.026, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],
   };
   function tex(internal, type, data = null) {
     const t = gl.createTexture();

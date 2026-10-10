@@ -63,6 +63,9 @@ function createClassNodes(gl, caps, shape) {
 
 // Linear HDR that displays ≈ #27303A after ACES + sRGB + lift (0.25 read as luma ~165 here). Canvas2D uses 0.25 in sRGB.
 const HAIRLINE_HDR = 0.035;
+// Light per particle vs. count, about the 131k reference: below it the light is conserved (fewer, brighter points);
+// above it a doubled count keeps v1's chunky, bright points and adds ~40 % light (sqrt law), read as thicker tubes.
+const countGain = (count) => { const k = 131072 / Math.max(1, count); return k >= 1 ? Math.min(4, k) : Math.sqrt(k); };
 
 export function emberLevel(u, t) {
   return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
@@ -130,13 +133,14 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
+  let gainS = -1;   // smoothed light per particle: a governor row-shed dims over ~0.6 s instead of popping in one frame
   function drawOpts(time) {
     const cam = model.cam, count = rows * tier.side[0];
     const rPx = cam.shellPx.r * hdrScale;
     return {
       trail: trail.read.texture, time, invRes: [1 / W, 1 / H],
       sizeK: particles.cfg.sizePx * (rPx / 135) * cam.dist * (tier.mobile ? 1.15 : 1),
-      intensity: particles.cfg.intensity * Math.min(4, 131072 / Math.max(1, count)),
+      intensity: particles.cfg.intensity * (gainS >= 0 ? gainS : countGain(count)),
       emberLevel: emberLevel(uniforms, time), ...colors,
     };
   }
@@ -204,6 +208,8 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
         particles.step(ratio, time, cam, fluid.texture, trail.read.texture, u, rows);
       }
     }
+    const gain = countGain(rows * tier.side[0]);
+    gainS = gainS < 0 || motion === 0 ? gain : gainS + (gain - gainS) * (1 - Math.pow(0.92, ratio));
     gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo); gl.viewport(0, 0, W, H);
     gl.clearColor(inkLinear[0], inkLinear[1], inkLinear[2], 0); gl.clear(gl.COLOR_BUFFER_BIT);
     particles.draw(cam, rows * tier.side[0], u, drawOpts(time));
