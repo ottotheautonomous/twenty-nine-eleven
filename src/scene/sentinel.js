@@ -19,7 +19,7 @@ export const TIERS = {
 };
 
 function pickTier(probe, override, force) {
-  if (override && TIERS[override]) return TIERS[override];
+  if (override && Object.hasOwn(TIERS, override)) return TIERS[override];   // own keys only: ?tier=constructor must not reach the prototype
   if (!probe.ok || (probe.software && !force)) return TIERS.c2d;
   const coarse = matchMedia('(pointer: coarse)').matches;
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
