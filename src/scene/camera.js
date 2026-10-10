@@ -5,7 +5,7 @@ import { FOV, KEY, EMBER } from './constants.js';
 export function createCameraState() {
   return { view: new Float32Array(16), proj: new Float32Array(16), viewProj: new Float32Array(16), inv: new Float32Array(16),
     right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1], lightDir: KEY.slice(), lightView: [0, 0, 1], eye: [0, 0, 10], dist: 10,
-    shellPx: { x: 0, y: 0, r: 1 }, emberPx: [0, 0], emberR: 1, guardY: 0, ready: false };
+    shellPx: { x: 0, y: 0, r: 1 }, emberPx: [0, 0], emberR: 1, guardY: 0, hazePx: [0, 0], ready: false };
 }
 
 const mulDir = (m, d) => {
@@ -39,6 +39,7 @@ export function computeCamera(out, u, view, orbit, probeS) {
   out.emberPx = projectPx(out.viewProj, [EMBER.offset * probeS[0], EMBER.offset * probeS[1], 0], width, height);
   out.emberR = EMBER.haloR * R_px;
   out.guardY = out.shellPx.y - R_px;                                           // lower limb, y up
+  out.hazePx = [0.22 * R_px * probeS[0], 0.22 * R_px * probeS[1]];          // the void answers the hand
   out.width = width; out.height = height; out.ready = true;
   return out;
 }

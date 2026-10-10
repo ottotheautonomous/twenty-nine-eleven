@@ -42,10 +42,10 @@ export function buildLattice(count, set = LATTICE.set, tilt = tiltMatrix()) {
 export const CLASS = { PT: 0, NET: 1, ACC: 2, CAM: 3 };
 // RFC 5737 / RFC 2606 documentation ranges only; security vocabulary only.
 export const POOL = [
-  ['203.0.113.7 · 443/TCP · TLS 1.3', '198.51.100.23 · 22/TCP · OPEN', '192.0.2.41 · 3389/TCP · FILTERED', 'CERT · *.example · 211 D', 'HTTP/2 · HSTS · OK'],
-  ['VLAN 20 · 198.51.100.0/24', 'core-01.example · AS64496', 'RTT 4 ms · 0.0 % LOSS', '802.1X · EAP-TLS', 'DHCP · 203.0.113.1'],
-  ['RDR-02 · OSDP v2 · SECURE', 'BADGE 0x2F11 · GRANTED', 'DOOR-04 · HELD 0 s', 'ACS · MFA · OK'],
-  ['CAM-07 · RTSP 554 · 25 FPS', 'NVR-01 · ONVIF · 8 CH', 'CAM-03 · 2.1 m · IR ON', 'CAM-12 · H.265 · 4 MP'],
+  ['203.0.113.7 · 443/TCP · TLS 1.3', '198.51.100.23 · 22/TCP · OPEN', '192.0.2.41 · 3389/TCP · FILTERED', 'CERT · *.example · 211 D', 'HTTP/2 · HSTS · OK', '203.0.113.19 · 8443/TCP · TLS 1.2', '198.51.100.8 · 25/TCP · STARTTLS', '192.0.2.77 · 445/TCP · CLOSED', 'SSH · ED25519 · KEX OK', 'CSP · STRICT · OK', '203.0.113.52 · 53/UDP · NO RECURSION', 'JWT · RS256 · 15 MIN'],
+  ['VLAN 20 · 198.51.100.0/24', 'core-01.example · AS64496', 'RTT 4 ms · 0.0 % LOSS', '802.1X · EAP-TLS', 'DHCP · 203.0.113.1', 'VLAN 30 · 192.0.2.0/25', 'edge-02.example · BGP · UP', 'LACP · 2 × 10G · OK', 'SNMPv3 · AUTHPRIV', 'DNS · 203.0.113.53 · DNSSEC', 'MTU 9000 · JUMBO', 'NTP · STRATUM 2 · ±1 ms'],
+  ['RDR-02 · OSDP v2 · SECURE', 'BADGE 0x2F11 · GRANTED', 'DOOR-04 · HELD 0 s', 'ACS · MFA · OK', 'RDR-05 · DESFire EV3', 'REX-03 · ARMED', 'BADGE 0x1A07 · DENIED', 'DOOR-09 · LOCKED · 23:12', 'PANEL-01 · TAMPER OK', 'ELEV-02 · FLOOR 4 · OK', 'TURNSTILE-01 · 1 / 1', 'ACS · AUDIT · 0 GAPS'],
+  ['CAM-07 · RTSP 554 · 25 FPS', 'NVR-01 · ONVIF · 8 CH', 'CAM-03 · 2.1 m · IR ON', 'CAM-12 · H.265 · 4 MP', 'CAM-09 · PTZ · PRESET 2', 'NVR-02 · RAID 6 · 31 D', 'CAM-01 · 0.002 LUX · OK', 'CAM-15 · TLS · ONVIF S', 'LPR-02 · 98.7 % · OK', 'CAM-05 · 12 mm · F1.6', 'CAM-11 · PoE 12.9 W', 'NVR-01 · CLOCK SYNC · OK'],
 ];
 export const ROW_READING = ['203.0.113.7 · 443/TCP · TLS 1.3', 'VLAN 20 · 198.51.100.0/24', 'RDR-02 · OSDP v2 · SECURE', 'CAM-07 · RTSP 554 · 25 FPS'];
 export const FINDING = ['CAM-07 · RTSP 554 · AUTH NONE', 'FINDING · TEST RANGE'];

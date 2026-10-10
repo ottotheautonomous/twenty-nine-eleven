@@ -23,7 +23,8 @@ export function createLabels(root, instrument, shape) {
   const valueEl = q('.instrument-value'), stateEl = q('.instrument-state'), findingsEl = q('.instrument-findings');
   const bound = new Map();
   const tmp = [0, 0, 0];
-  let lastIntegrity = 0, findingNode = -1;
+  let lastIntegrity = 0, findingNode = -1, stateWord = 'STANDBY';
+  for (const el of instrument?.querySelectorAll('.instrument-key, .instrument-label') ?? []) el.dataset.text ??= el.textContent;
   tier0.__on = false;
 
   function cssPoint(cam, p, out) {
@@ -48,15 +49,22 @@ export function createLabels(root, instrument, shape) {
   function unbind(el) {
     if (el.__node === undefined || el.__node === null) return;
     bound.delete(el.__node);
-    el.__node = null; el.__text = null;
+    el.__node = null; el.__text = null; el.__sortY = undefined;
     el.__fade?.stop();
     el.__fade = animate(el, { opacity: 0 }, { duration: reduced() ? 0 : 0.06 });
   }
 
   // labels: model.state.labels; cam: model.cam with scaleX/scaleY (backing px per CSS px).
+  // Layout: anchors are pushed out of the ember's halo, then stacked in one column per side of the ember
+  // (18 px pitch, 32 for the two-line finding). On phones a single reading sits centred under the cage.
+  const items = [];
   function position(labels, cam) {
     if (!cam.ready) return;
+    const phone = cam.cssWidth < 600;
+    if (phone && labels.length > 1) labels = labels.slice(0, 1);
+    const R = cam.shellPx.r / cam.scaleY, ex = cam.emberPx[0] / cam.scaleX, ey = (cam.height - cam.emberPx[1]) / cam.scaleY;
     for (const el of pool) el.__used = false;
+    items.length = 0;
     for (const l of labels) {
       let el = bound.get(l.node);
       const text = Array.isArray(l.text) ? l.text.join('\n') : l.text;
@@ -64,16 +72,32 @@ export function createLabels(root, instrument, shape) {
       if (!el) { el = pool.find((e) => e.__node === null || e.__node === undefined); if (!el) continue; bind(el, l); }
       el.__used = true;
       const p = nodePoint(cam, l.node);
-      const flip = p.x > cam.cssWidth - 160;
-      el.style.transform = `translate3d(${Math.round(p.x + (flip ? -10 : 10))}px, ${Math.round(p.y + 10)}px, 0)`;
-      el.classList.toggle('is-left', flip);
+      items.push({ el, x: p.x, y: p.y, pitch: l.finding ? 32 : 18 });
+    }
+    if (phone) {
+      for (const it of items) { it.x = cam.shellPx.x / cam.scaleX; it.y = (cam.height - cam.shellPx.y) / cam.scaleY + R + 10; }
+    } else {
+      for (const it of items) {
+        const dx = it.x - ex, dy = it.y - ey, d = Math.hypot(dx, dy) || 1, min = 0.5 * R;
+        if (d < min) { it.x = ex + dx / d * min; it.y = ey + dy / d * min; }
+      }
+      // Stable order: a label keeps its slot unless its anchor moves more than 6 px (the cage drifts every frame).
+      for (const it of items) { if (it.el.__sortY === undefined || Math.abs(it.y - it.el.__sortY) > 6) it.el.__sortY = it.y; }
+      for (const side of [items.filter((i) => i.x < ex), items.filter((i) => i.x >= ex)]) {
+        side.sort((a, b) => a.el.__sortY - b.el.__sortY);
+        for (let i = 1; i < side.length; i++) side[i].y = Math.max(side[i].y, side[i - 1].y + side[i - 1].pitch);
+      }
+    }
+    for (const it of items) {
+      const flip = !phone && (it.x < ex ? it.x > 170 : it.x > cam.cssWidth - 160);
+      it.el.classList.toggle('is-centred', phone);
+      it.el.classList.toggle('is-left', flip);
+      const ox = phone ? 0 : flip ? -14 : 14;
+      it.el.style.transform = `translate3d(${Math.round(it.x + ox)}px, ${Math.round(it.y + (phone ? 0 : -8))}px, 0)`;
     }
     for (const el of pool) if (!el.__used) unbind(el);
     if (findingNode >= 0 && dot.isConnected) { const p = nodePoint(cam, findingNode); dot.style.transform = `translate3d(${p.x}px, ${p.y}px, 0)`; }
-    if (tier0.__on) {
-      const e = { x: cam.emberPx[0] / cam.scaleX, y: (cam.height - cam.emberPx[1]) / cam.scaleY };
-      tier0.style.transform = `translate3d(${Math.round(e.x)}px, ${Math.round(e.y + 28)}px, 0)`;
-    }
+    if (tier0.__on) tier0.style.transform = `translate3d(${Math.round(ex)}px, ${Math.round(items.length ? ey - 34 : ey + 28)}px, 0)`;
   }
 
   function setIntegrity(v, force = false) {
@@ -84,7 +108,7 @@ export function createLabels(root, instrument, shape) {
     const text = v.toFixed(3);
     if (valueEl.textContent !== text) valueEl.textContent = text;
   }
-  function setState(word) { if (stateEl) decodeText(stateEl, word, { duration: 0.4, alphaDuration: 0.2, fraction: 0.6 }); }
+  function setState(word) { stateWord = word; if (stateEl) decodeText(stateEl, word, { duration: 0.4, alphaDuration: 0.2, fraction: 0.6 }); }
   function setFindings(node) {
     findingNode = node;
     instrument?.classList.add('has-finding');
@@ -101,8 +125,8 @@ export function createLabels(root, instrument, shape) {
   function hideAll() { pool.forEach(unbind); showTier0(false); }
   function decodeInstrument() {
     if (!instrument) return;
-    animate(instrument, { opacity: [0, 1] }, { duration: 0.3 });
-    for (const el of instrument.querySelectorAll('.instrument-key, .instrument-label, .instrument-state')) decodeText(el, el.textContent, { duration: 0.75, alphaDuration: 0.4, fraction: 0.6 });
+    for (const el of instrument.querySelectorAll('.instrument-key, .instrument-label')) decodeText(el, el.dataset.text, { duration: 0.75, alphaDuration: 0.4, fraction: 0.6 });
+    if (stateEl) decodeText(stateEl, stateWord, { duration: 0.75, alphaDuration: 0.4, fraction: 0.6 });
   }
   function countIn(to = 0.998) { return animate(0, to, { duration: 0.6, ease: [0.22, 1, 0.36, 1], onUpdate: (v) => setIntegrity(v, true) }); }
   function blinkIntegrity(from = 0.9, to = 0.998) {

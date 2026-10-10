@@ -61,8 +61,11 @@ function createClassNodes(gl, caps, shape) {
   };
 }
 
+// Linear HDR that displays ≈ #27303A after ACES + sRGB + lift (0.25 read as luma ~165 here). Canvas2D uses 0.25 in sRGB.
+const HAIRLINE_HDR = 0.035;
+
 export function emberLevel(u, t) {
-  return u.u_ember.value * (1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
+  return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
     * (1 - 0.15 * u.u_tear.value) * (1 + 0.05 * Math.sin(1.9 * t) * u.u_idle.value);
 }
 
@@ -80,7 +83,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: false, homes: shape.homes, latticeRotT: shape.rotT, shape: shape.shapeId });
   }
   if (!particles.mrtOk) return null;
-  const bloom = createBloom(gl, caps, { levels: tier.bloomLevels, threshold: 0.5, smoothing: 0.03, radius: 0.85 });
+  const bloom = createBloom(gl, caps, { levels: tier.bloomLevels, threshold: 0.8, smoothing: 0.03, radius: 0.85 });   // only the ember (HDR 3.0) blooms
   const trailP = createProgram(gl, caps, FULLSCREEN_VS, trailSrc);
   const emberP = createProgram(gl, caps, FULLSCREEN_VS, emberSrc);
   const compP = createProgram(gl, caps, FULLSCREEN_VS, compositeSrc);
@@ -99,15 +102,21 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   const colors = { colDark: linearRGB(COLORS.shadow), colLight: linearRGB(COLORS.hi), colFast: linearRGB(COLORS.rim), ember: linearRGB(COLORS.ember), hot: linearRGB(COLORS.hot) };
   const srgb = { ink: hexRGB(COLORS.ink), haze: hexRGB(COLORS.haze), slate: hexRGB(COLORS.slate), accent: hexRGB(COLORS.ember) };
   const inkLinear = linearRGB(COLORS.ink);
-  let W = 1, H = 1, hdr = [null, null], hdrIndex = 0, trail = null, rows = tier.rowsStart, stillSeeded = false, lastError = 0;
+  let W = 1, H = 1, hdr = [null, null], hdrIndex = 0, trail = null, rows = tier.rowsStart, stillSeeded = false, seedBuild = -1, lastError = 0;
+  let hdrScale = tier.hdrScale, lastW = 1, lastH = 1, forceRealloc = false;
   const bnOffset = [0, 0];
 
   function resize(width, height) {
-    W = Math.max(1, Math.round(width * tier.hdrScale)); H = Math.max(1, Math.round(height * tier.hdrScale));
+    lastW = width; lastH = height;
+    const w = Math.max(1, Math.round(width * hdrScale)), h = Math.max(1, Math.round(height * hdrScale));
+    fluid.resize(width, height);                 // returns early itself when the sim size is unchanged
+    if (!forceRealloc && hdr[0] && w === W && h === H) return;    // no realloc, no trail/HDR wipe
+    forceRealloc = false;
+    W = w; H = h;
     hdr.forEach((t) => t?.dispose());
     hdr = [createTarget(gl, W, H, hdrFmt), createTarget(gl, W, H, hdrFmt)];
     trail?.dispose(); trail = createPair(gl, Math.max(1, Math.round(W / 5)), Math.max(1, Math.round(H / 5)), hdrFmt);
-    bloom.resize(W, H); fluid.resize(width, height);
+    bloom.resize(W, H);
     stillSeeded = false;
   }
   const ok = () => programs.every((p) => p.ready());
@@ -123,7 +132,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   }
   function drawOpts(time) {
     const cam = model.cam, count = rows * tier.side[0];
-    const rPx = cam.shellPx.r * tier.hdrScale;
+    const rPx = cam.shellPx.r * hdrScale;
     return {
       trail: trail.read.texture, time, invRes: [1 / W, 1 / H],
       sizeK: particles.cfg.sizePx * (rPx / 135) * cam.dist * (tier.mobile ? 1.15 : 1),
@@ -148,7 +157,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   }
 
   function drawEmber(prev, cam, u, time) {
-    const p = emberP.uniforms, s = tier.hdrScale;
+    const p = emberP.uniforms, s = hdrScale;
     const ex = cam.emberPx[0] * s, ey = cam.emberPx[1] * s, er = Math.max(1, cam.emberR * s);
     const x0 = Math.max(0, Math.floor(ex - 3 * er)), y0 = Math.max(0, Math.floor(ey - 3 * er));
     const x1 = Math.min(W, Math.ceil(ex + 3 * er)), y1 = Math.min(H, Math.ceil(ey + 3 * er));
@@ -172,8 +181,9 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     blueNoiseOffset(blue.size, bnOffset); gl.uniform2i(p.uBlueOffset, bnOffset[0], bnOffset[1]);
     gl.uniform1f(p.uBloomIntensity, 0.9); gl.uniform1f(p.uExposure, 1.0);
     gl.uniform3fv(p.uInk, srgb.ink); gl.uniform3fv(p.uHaze, srgb.haze); gl.uniform3fv(p.uSlate, srgb.slate); gl.uniform3fv(p.uAccent, srgb.accent);
-    gl.uniform1f(p.uLift, 0.12); gl.uniform1f(p.uHighlightTint, 0.08); gl.uniform1f(p.uVignette, 0.25); gl.uniform1f(p.uDither, 1.0);
+    gl.uniform1f(p.uLift, 0.12); gl.uniform1f(p.uHighlightTint, 0.14); gl.uniform1f(p.uVignette, 0.25); gl.uniform1f(p.uDither, 1.0);
     gl.uniform3f(p.uShell, cam.shellPx.x, cam.shellPx.y, cam.shellPx.r);
+    gl.uniform2f(p.uHazeLean, cam.hazePx[0], cam.hazePx[1]);
     gl.uniform1f(p.uGuardY, cam.guardY); gl.uniform1f(p.uGuardFeather, (tier.mobile ? 16 : 28) * (cam.scaleY || 1));
     gl.uniform1f(p.uDim, u.u_dim.value); gl.uniform1f(p.uCA, u.u_ca.value);
     blit(gl, null);
@@ -186,19 +196,24 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     const cur = hdr[hdrIndex], prev = hdr[hdrIndex ^ 1];
     if (motion === 0) {
       // The composed still: the cage exactly at home, built, no trail.
-      if (!stillSeeded) { particles.reset(); clearTrail(); particles.step(0, time, cam, fluid.texture, trail.read.texture, u, rows); stillSeeded = true; }
+      if (!stillSeeded || u.u_build.value !== seedBuild) { particles.reset(); clearTrail(); particles.step(0, time, cam, fluid.texture, trail.read.texture, u, rows); stillSeeded = true; seedBuild = u.u_build.value; }
     } else {
       stillSeeded = false;
       if (dtMs > 0) {
-        if (s.simulate) { fluid.step(dt); stepTrail(ratio); }
+        if (s.simulate) { fluid.step(dt); stepTrail(ratio); } else model.trail.pressDisc = false;
         particles.step(ratio, time, cam, fluid.texture, trail.read.texture, u, rows);
       }
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo); gl.viewport(0, 0, W, H);
     gl.clearColor(inkLinear[0], inkLinear[1], inkLinear[2], 0); gl.clear(gl.COLOR_BUFFER_BIT);
     particles.draw(cam, rows * tier.side[0], u, drawOpts(time));
-    if (u.u_classAmp.value > 0.001) classNodes.draw(cam, u, (cam.scaleY || 1) * tier.hdrScale);
-    if (model.linkAlpha > 0.001) plexus.draw(shape.nodes, cam.viewProj, [0.84, 0.91, 0.97], 0.25 * model.linkAlpha);
+    if (u.u_classAmp.value > 0.001) classNodes.draw(cam, u, (cam.scaleY || 1) * hdrScale);
+    if (model.linkAlpha > 0.001) plexus.draw(shape.nodes, cam.viewProj, [0.84, 0.91, 0.97], HAIRLINE_HDR * model.linkAlpha);
+    if (motion === 0) {   // a still has no previous frame with the same geometry: give the ember this frame's coverage
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, cur.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prev.fbo);
+      gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo);
+    }
     drawEmber(prev, cam, u, time);
     const bloomTex = bloom.render(cur.texture, W, H) || cur.texture;
     composite(cur, bloomTex, cam, u);
@@ -213,6 +228,12 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     ready: () => ok() && !!hdr[0],
     warmup, resize, draw,
     setRows(n) { rows = Math.max(1, Math.min(tier.side[1], Math.round(n))); },
+    // Governor ladder: bloom levels, HDR scale, pressure iterations, fluid resolution. Rebuilds the affected targets.
+    setQuality(q) {
+      bloom.cfg.levels = q.bloomLevels; fluid.cfg.pressureIterations = q.jacobi; fluid.cfg.simRes = q.fluidRes;
+      hdrScale = q.hdrScale; forceRealloc = true;
+      if (hdr[0]) resize(lastW, lastH);
+    },
     glError: () => lastError,
     get rows() { return rows; },
     destroy() {

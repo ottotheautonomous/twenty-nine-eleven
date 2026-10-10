@@ -13,7 +13,7 @@ uniform mat4 uViewProj, uView;
 uniform vec3 uCamRight, uCamUp, uLightDir;
 uniform vec3 uProbe;
 uniform float uTime, uRatio, uK06;
-uniform float uBuild, uOpen, uFlinch, uTight, uIdle;
+uniform float uBuild, uOpen, uFlinch, uTight, uIdle, uPresent;
 uniform float uFluidPush, uSwirl, uSwirlFreq, uSpring, uAttract, uFriction, uSpeedLerp, uWrap, uBound;
 layout(location = 0) out vec4 oOff;            // xyz offset from home, w = wrap-diffuse lighting
 layout(location = 1) out vec4 oVel;            // xyz, w = smoothed speed
@@ -30,7 +30,7 @@ void main() {
   float built = smoothstep(s - 0.08, s, 1.2 * uBuild);
 
   // Proximity: the lattice notices the probe, through two cascaded lerps (90 % in 1.05 s).
-  float prox = (1.0 - smoothstep(0.35, 1.2, distance(p, uProbe))) * (0.5 + 0.3 * sin(uTime + r * 12.34) * r);
+  float prox = uPresent * (1.0 - smoothstep(0.35, 1.2, distance(p, uProbe))) * (0.5 + 0.3 * sin(uTime + r * 12.34) * r);
   float idle = uIdle * 0.2 * (0.5 + 0.5 * sin(-2.0 * uTime + home.x)) * (0.5 + 0.5 * cos(-uTime)) * mix(0.5, 2.0, r);
   float target = max(idle, prox);
   float d1 = mix(A.x, target, uK06), d2 = mix(A.y, d1, uK06);
@@ -62,7 +62,7 @@ void main() {
 
   float diff = max((dot(nrm, uLightDir) + uWrap) / (1.0 + uWrap), 0.0);
   float inside = d < 0.0 ? mix(0.35, 1.0, smoothstep(-0.12, 0.0, d)) : 1.0;
-  float warm = max(dot(nrm, -normalize(p + vec3(1e-5))), 0.0) * 0.6;
+  float warm = max(dot(nrm, -normalize(p + vec3(1e-5))), 0.0) * 0.6 * (1.0 - smoothstep(0.35, 0.75, length(hv.xy)));   // only struts near the ember's halo
 
   oOff = vec4(p - home, diff * inside);
   oVel = vec4(v, mix(V.w, length(v), uSpeedLerp));
@@ -121,9 +121,9 @@ void main() {
   float lit = vLight * (0.55 + 0.45 * diff);
   vec3 col = mix(uColDark, uColLight, lit);
   col = mix(col, uColFast, smoothstep(uFastRange.x, uFastRange.y, vSpeed));
-  col = mix(col, uEmberCol, vWarm * vWarm * uEmberLevel * 0.35);
+  col = mix(col, uEmberCol, vWarm * vWarm * uEmberLevel * 0.25);
   vec2 tr = texture(uTrail, gl_FragCoord.xy * uInvRes).rg;
-  col += uColFast * (tr.g * 6.0 + tr.r * 0.4);
+  col += uColFast * (tr.g * 2.5 + tr.r * 0.3);                        // the breach rim brightens the lattice; it does not scratch the ember
   col += uColFast * vD2 * vD2 * 0.8;
   float a = (1.0 - 0.6 * smoothstep(uBlurRange.x, uBlurRange.y, vSpeed)) * vFade * vBuilt;
   a *= 1.0 - smoothstep(0.75, 1.0, r2);
@@ -139,8 +139,8 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     render: createProgram(gl, caps, RENDER_VS, RENDER_FS),
   };
   const cfg = {
-    fluidPush: 5e-4, swirl: 0.7e-4, swirlFreq: 7.0, spring: 1e-3, attract: 9e-4, friction: 0.9, speedLerp: 0.035, wrap: 0.25, bound: 2.5,
-    sizePx: 2.0, intensity: 0.032, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],
+    fluidPush: 5e-4, swirl: 0.7e-4, swirlFreq: 7.0, spring: 1e-3, attract: 9e-4, friction: 0.9, speedLerp: 0.035, wrap: 0.18, bound: 2.5,
+    sizePx: 1.6, intensity: 0.026, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],
   };
   function tex(internal, type, data = null) {
     const t = gl.createTexture();
@@ -195,7 +195,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3f(s.uProbe, u.u_probeX.value, u.u_probeY.value, u.u_probeZ.value);
     gl.uniform1f(s.uTime, time % 1000); gl.uniform1f(s.uRatio, ratio); gl.uniform1f(s.uK06, 1 - Math.pow(1 - 0.06, ratio));
     gl.uniform1f(s.uBuild, u.u_build.value); gl.uniform1f(s.uOpen, u.u_open.value); gl.uniform1f(s.uFlinch, u.u_flinch.value);
-    gl.uniform1f(s.uTight, u.u_tight.value); gl.uniform1f(s.uIdle, u.u_idle.value);
+    gl.uniform1f(s.uTight, u.u_tight.value); gl.uniform1f(s.uIdle, u.u_idle.value); gl.uniform1f(s.uPresent, u.u_present.value);
     gl.uniform1f(s.uFluidPush, cfg.fluidPush); gl.uniform1f(s.uSwirl, cfg.swirl); gl.uniform1f(s.uSwirlFreq, cfg.swirlFreq);
     gl.uniform1f(s.uSpring, cfg.spring); gl.uniform1f(s.uAttract, cfg.attract);
     gl.uniform1f(s.uFriction, Math.pow(cfg.friction, ratio)); gl.uniform1f(s.uSpeedLerp, 1 - Math.pow(1 - cfg.speedLerp, ratio));

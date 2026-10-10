@@ -49,6 +49,8 @@ let idleArmed = false;
 let idleTimer = 0;
 let sentryTimer = 0;
 let integrityLive = reducedMotion.matches;
+let rowIntent = 0;
+let lastDrawnEngage = 0;
 const still = () => reducedMotion.matches || paused || params.has('still');
 
 // Lift the CSS entrance gate without a flash: targets start transparent inline.
@@ -60,6 +62,7 @@ root.classList.add('entered');
 const sentinel = createSentinel(canvas, anchor, uniforms, { debug: Math.max(0, debug), readout: debug >= 0, readouts: $('.readouts'), instrument });
 root.dataset.renderer = sentinel.type;
 const model = sentinel.model;
+model.state.entered = entered;
 const labels = sentinel.labels;
 if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
 
@@ -68,13 +71,14 @@ const textFeedback = createTextMotion(document.querySelectorAll('.service, .vers
   onActive: rowActive,
 });
 // The wordmark parallaxes opposite the camera, written from the same orbit cascade so the layers move as one rig.
-const nameX = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
-const nameY = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
-styleEffect(wordmark, { x: nameX, y: nameY });
+// The visitor light is scoped to the wordmark and the dialog: on :root it forced a document-wide style recalc per frame.
 const soft = { stiffness: 95, damping: 23 };
 const textLightX = springValue('50%', soft);
 const textLightY = springValue('45%', soft);
-styleEffect(root, { '--visitor-x': textLightX, '--visitor-y': textLightY });
+const nameX = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
+const nameY = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
+styleEffect(wordmark, { x: nameX, y: nameY, '--visitor-x': textLightX, '--visitor-y': textLightY });
+styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 model.state.onFrame = () => {
   nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3);
   if (integrityLive) labels.setIntegrity(model.state.integrity);
@@ -84,7 +88,10 @@ model.state.onState = word => labels.setState(word);
 model.state.onTier0 = on => { animate(uniforms, { u_tier0: on ? 1 : 0 }, { duration: on ? .5 : .4, ease }); labels.showTier0(on); };
 model.state.onFinding = node => labels.setFindings(node);
 // When the loop is idle (paused, reduced motion, modal open) engagement still redraws the composed frame.
-engage.on('change', () => { if (!looping) sentinel.drawOnce(); });
+engage.on('change', () => {
+  if (looping) return;
+  if (modalState === 'closed' || Math.abs(engage.get() - lastDrawnEngage) > 0.02) { lastDrawnEngage = engage.get(); sentinel.drawOnce(); }
+});
 
 // One continuous light across the words: each word's background is the h1 box. Offsets are measured through
 // the offsetParent chain because the parallax transform can make the h1 itself the words' offsetParent.
@@ -106,14 +113,15 @@ function measureName() {
   }
 }
 function measure() { sentinel.measure(); measureName(); }
-window.addEventListener('resize', () => { sentinel.resize(); measureName(); textFeedback.refresh(); }, { passive: true });
+let resizeTimer = 0;
+window.addEventListener('resize', () => { measureName(); sentinel.measure(); textFeedback.refresh(); clearTimeout(resizeTimer); resizeTimer = setTimeout(() => sentinel.resize(), 120); }, { passive: true });
 window.addEventListener('scroll', () => sentinel.measure(), { passive: true });
 new ResizeObserver(measure).observe(stage);
 document.fonts.ready.then(measure);
 measureName();
 
 function refreshIntent() {
-  const value = clamp(Math.max(pointerIntent, focusIntent));
+  const value = clamp(Math.max(pointerIntent, focusIntent, rowIntent));
   if (still()) engage.jump(value); else engage.set(value);
 }
 function updateAmbient() {
@@ -124,13 +132,17 @@ function updateAmbient() {
   sentinel.setActive(looping);
   motionToggle.hidden = reducedMotion.matches || sentinel.type === 'static';
   motionToggle.setAttribute('aria-pressed', String(paused));
-  motionToggle.setAttribute('aria-label', paused ? 'Resume motion' : 'Pause motion');
   motionToggle.title = paused ? 'Resume motion' : 'Pause motion';
   $('#motion-icon').setAttribute('d', paused ? 'm7 5 7 5-7 5Z' : 'M7 5v10M13 5v10');
 }
 function applyMotionPolicy() {
   uniforms.u_motion.value = still() ? 0 : 1;
-  if (still()) { labels.hideAll(); stopSentry(); }
+  if (still()) {
+    labels.hideAll(); stopSentry();
+    const t0 = model.state.tier0; if (t0.on) { t0.on = false; t0.since = -1; }
+    animate(uniforms, { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();
+    model.rowHover(-1); rowIntent = 0;
+  }
   updateAmbient(); refreshIntent(); resetServiceMotion(); sentinel.drawOnce();
 }
 
@@ -143,7 +155,7 @@ function noteActivity() {
   idleTimer = setTimeout(() => { if (!still() && modalState === 'closed') idle.set(1); }, 4000);
 }
 function armIdle() { idleArmed = true; noteActivity(); }
-function sentryPass() { animate(uniforms, { u_sentry: [0.001, 1] }, { duration: 2.5, ease: 'linear' }).then(() => { uniforms.u_sentry.value = 0; }); }
+function sentryPass() { animate(uniforms, { u_sentry: [0.001, 1] }, { duration: 2.5, ease: 'linear' }).then(() => animate(uniforms, { u_sentry: 0 }, { duration: 0 })); }
 function stopSentry() { clearInterval(sentryTimer); sentryTimer = 0; }
 idle.on('change', value => {
   if (value > 0.999 && !sentryTimer && !still() && modalState === 'closed') { sentryPass(); sentryTimer = setInterval(sentryPass, 9000); }
@@ -157,7 +169,7 @@ if (still()) {
   for (const [key, value] of Object.entries(settled)) uniforms[key].value = value;
   labels.setIntegrity(.998, true);
 } else {
-  const sceneIn = () => entrance.push(
+  const sceneIn = () => still() ? (Object.entries(settled).forEach(([k, v]) => { uniforms[k].value = v; }), canvas.style.opacity = '1') : entrance.push(
     animate(canvas, { opacity: [0, 1] }, { duration: .5, delay: .15 }),
     animate(uniforms, { u_ember: [0, 1] }, { duration: .7, ease: [0.2, 0.8, 0.2, 1], delay: .3 }),
     animate(uniforms, { u_build: [0, 1] }, { duration: 1.5, ease, delay: .4 }),
@@ -173,13 +185,14 @@ if (still()) {
     animate('.contact-trigger-shell', { opacity: [0, 1], y: [6, 0] }, { duration: .6, ease, delay: 1.95 }),
     animate('.verse', { opacity: [0, 1] }, { duration: .8, delay: 2.1 }),
     animate(motionToggle, { opacity: [0, .6] }, { duration: .6, delay: 2.3 }),
+    animate(instrument, { opacity: [0, 1] }, { duration: .3, delay: 2.3 }),
   );
   delay(() => {
     if (still()) return;
     labels.decodeInstrument();
     labels.countIn(.998).then(() => { integrityLive = true; });
   }, 2.3);
-  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; armIdle(); });
+  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; model.state.entered = true; armIdle(); });
 }
 sentinel.enableSimulationAt(1.9);
 uniforms.u_motion.value = still() ? 0 : 1;
@@ -232,7 +245,7 @@ scene.addEventListener('pointerdown', event => {
   model.pointer(nx, ny, event.timeStamp);
   model.press(nx, ny);
   // A press: the whole perimeter flinches outward for one beat and the ember flares.
-  uniforms.u_flinch.value = 1; animate(uniforms, { u_flinch: 0 }, { type: 'spring', stiffness: 400, damping: 24 });
+  animate(uniforms, { u_flinch: [1, 0] }, { type: 'spring', stiffness: 400, damping: 24 });
   boost('u_boostPress', .4, .6);
 }, { passive: true });
 scene.addEventListener('pointerup', event => {
@@ -252,7 +265,9 @@ scene.addEventListener('pointercancel', leaveScene);
 dialog.addEventListener('pointermove', event => {
   if (dialog.open) visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse');
 }, { passive: true });
-function boost(key, peak, seconds) { uniforms[key].value = peak; animate(uniforms, { [key]: 0 }, { duration: seconds, ease: [0.2, 0.8, 0.2, 1] }); }
+// Motion keeps one value per animated uniform; a direct write to .value would be invisible to it, so every
+// gesture starts from explicit keyframes (a bare target would animate from Motion's last value, not the peak).
+function boost(key, peak, seconds) { animate(uniforms, { [key]: [peak, 0] }, { duration: seconds, ease: [0.2, 0.8, 0.2, 1] }); }
 function ring(lon) {
   uniforms.u_ringLon.value = lon;
   animate(uniforms, { u_ringAmp: 1 }, { duration: .15 });
@@ -262,15 +277,23 @@ function ring(lon) {
 // The rows are plain text, but their hover is felt in the scene: a dotted packet runs the meridian above the
 // word; a row-1 word lights its asset class and prints its own reading; a row-2 word tightens the lattice.
 function rowActive(element, active) {
-  if (!element.matches('.service') || still() || !entered) return;
-  const rect = element.getBoundingClientRect(), shell = anchor.getBoundingClientRect();
-  const theta = clamp((rect.left + rect.width / 2 - (shell.left + shell.width / 2)) / Math.max(1, shell.width / 2), -1, 1);
-  const lon = Math.asin(theta);
+  if (!element.matches('.service')) return;
+  if (!active && still()) {   // always tear down; while still, set now and redraw instead of tweening
+    animate(uniforms, element.dataset.row === '1' ? { u_classAmp: 0 } : { u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();
+    if (element.dataset.row === '1') { model.rowHover(-1); rowIntent = 0; refreshIntent(); }
+    sentinel.drawOnce(); return;
+  }
+  if (still() || !entered) return;
+  // Map the word's position across its row to ±66° of longitude: outer words run the limb meridians, inner words the front.
+  const rect = element.getBoundingClientRect(), row = element.closest('.services').getBoundingClientRect();
+  const theta = clamp((rect.left + rect.width / 2 - (row.left + row.width / 2)) / Math.max(1, row.width / 2), -1, 1);
+  const lon = theta * 1.15;
   if (active) ring(lon);
   if (element.dataset.row === '1') {
     const c = CLASS[element.dataset.class];
-    if (active) { uniforms.u_classSel.value = c; animate(uniforms, { u_classAmp: 1 }, { duration: .2 }); model.rowHover(c, lon, ROW_READING[c]); engage.set(.5); }
-    else { animate(uniforms, { u_classAmp: 0 }, { duration: .4 }); model.rowHover(-1); engage.set(0); }
+    if (active) { uniforms.u_classSel.value = c; animate(uniforms, { u_classAmp: 1 }, { duration: .2 }); model.rowHover(c, lon, ROW_READING[c]); rowIntent = .5; }
+    else { animate(uniforms, { u_classAmp: 0 }, { duration: .4 }); model.rowHover(-1); rowIntent = 0; }
+    refreshIntent();
   } else {
     animate(uniforms, { u_tight: active ? 1 : 0, u_warm: active ? 1 : 0 }, { duration: active ? .3 : .8, ease });
   }
@@ -355,7 +378,10 @@ function coreTransform() {
   return `translate(${from.x + from.width / 2 - to.x - to.width / 2}px, ${from.y + from.height / 2 - to.y - to.height / 2}px) scale(.5)`;
 }
 function setScenery(value) {
-  uniforms.u_dolly.value = value; uniforms.u_dim.value = value; uniforms.u_open.value = value; sentinel.drawOnce();
+  const values = { u_dolly: [value, value], u_dim: [value, value], u_open: [value, value] };
+  animate(uniforms, values, { duration: 0 }).complete();          // keep Motion's own values in step with the still
+  for (const key of Object.keys(values)) uniforms[key].value = value;
+  sentinel.drawOnce();
 }
 function focusContact() {
   if (!success.hidden) success.focus({ preventScroll: true });
@@ -446,7 +472,7 @@ reducedMotion.addEventListener('change', () => {
       document.querySelectorAll('.dialog-item').forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; });
       scene.style.opacity = '.22'; veil.style.opacity = '.5'; setScenery(1); modalState = 'open';
     }
-    entered = true;
+    entered = true; model.state.entered = true;
   } else armIdle();
   applyMotionPolicy();
 });

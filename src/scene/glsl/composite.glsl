@@ -7,6 +7,7 @@ uniform float uBloomIntensity, uExposure;
 uniform vec3 uInk, uHaze, uSlate, uAccent;   // sRGB floats
 uniform float uLift, uHighlightTint, uVignette, uDither;
 uniform vec3 uShell;                         // shell centre (px, y up) and radius (px), output space
+uniform vec2 uHazeLean;                      // the haze leans with the probe (px)
 uniform float uGuardY, uGuardFeather;        // lower limb (px, y up); bloom fades to 0 within the feather below it
 uniform float uDim, uCA;
 out vec4 o;
@@ -26,7 +27,8 @@ void main() {
   vec3 bloom = texture(uBloom, vUv).rgb * uBloomIntensity * guard;
   vec3 hdr = max(scene + bloom, 0.0) * uExposure;
   vec3 c = toSRGB(acesFit(hdr));
-  c += (uHaze - uInk) * (1.0 - smoothstep(0.0, 1.6, rr));
+  vec2 qh = (px - (uShell.xy + uHazeLean)) / max(uShell.z, 1.0);
+  c += (uHaze - uInk) * (1.0 - smoothstep(0.0, 2.2, length(qh)));
   vec3 lift = uSlate * uLift; c = lift + (1.0 - lift) * c;
   float l = lumaOf(c);
   vec3 tinted = l * uAccent / max(lumaOf(uAccent), 1e-4);

@@ -20,7 +20,7 @@ export function createTextMotion(elements, { canAnimate, compact = () => innerWi
       for (const character of Array.from(node.textContent)) {
         const span = document.createElement('span');
         span.className = character === ' ' ? 'motion-space' : 'motion-char';
-        span.textContent = character === ' ' ? '\u00a0' : character;
+        span.textContent = character;
         label.appendChild(span);
       }
       node.replaceWith(label);

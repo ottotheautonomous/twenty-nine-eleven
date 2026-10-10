@@ -56,17 +56,25 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
 
   const anchor = { x: 0, y: 0, h: 1 };
   const coarse = matchMedia('(pointer: coarse)');
-  let active = false, lost = false, accum = 0, drawNow = false, pendingDelta = 0;
+  let active = false, lost = false, drawNow = false, pendingDelta = 0;
   let sceneTime = 0, simAt = 1.9, simAllowed = false, readyFired = false, readyCbs = [];
-  let scale = 1, cap = 1, ema = 16.7, slow = 0, fast = 0, frozenUntil = 0, rows = tier.rowsStart || 0;
-  let stillPending = false, readoutEl = null, glError = 0;
+  // Governor state. rel = governed fraction of the DPR cap (GL); the ladder steps quality after the scale floor.
+  let rel = 1, cap = 1, scale = 1, ema = 1000 / 60, slow = 0, fast = 0, frozenUntil = 0, rows = tier.rowsStart || 0;
+  let period = 1000 / 60, sinceDraw = 0, lastRaf = 0, lastDrawAt = 0, refresh = 1000 / 60, refreshSeen = false, drawEma = 1000 / 60;
+  let step = 0, cooldownUntil = 0, mpScale = 1;
+  let stillPending = false, readoutEl = null;
+  const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // per renderer: TIERS stay untouched
+  const LADDER_GL = ['bloom', 'rows', 'rows', 'rows', 'jacobi', 'fluidRes'];
+  const LADDER_C2D = ['sprites', 'sprites', 'mp'];
+  const FLUID_STEPS = [64, 96, 128];
 
   function budget() {
     const w = Math.max(1, canvas.clientWidth || innerWidth), h = Math.max(1, canvas.clientHeight || innerHeight);
-    const mp = (coarse.matches && tier.name === 'c2d' ? 0.9 : tier.mpCap) * 1e6;
+    const mp = (coarse.matches && renderer?.type === 'canvas2d' ? 0.9 : (tier.mpCap || 1.3)) * mpScale * 1e6;
     return { w, h, max: Math.sqrt(mp / (w * h)) };
   }
-  const governed = () => renderer && renderer.type === 'webgl2' && !probe.software && !params.has('quality');
+  const isGL = () => renderer?.type === 'webgl2';
+  const governed = () => renderer && !params.has('quality') && (isGL() ? !probe.software : true);
   function project() {
     const sx = canvas.width / Math.max(1, canvas.clientWidth || innerWidth), sy = canvas.height / Math.max(1, canvas.clientHeight || innerHeight);
     view.anchorX = anchor.x * sx; view.anchorY = anchor.y * sy; view.anchorH = Math.max(1, anchor.h * sy);
@@ -78,8 +86,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (!renderer) return;
     const { w, h, max } = budget();
     cap = Math.min(devicePixelRatio || 1, tier.dprCap || 1, max);
-    scale = governed() ? Math.min(scale || cap, cap) : cap;
-    if (!governed()) scale = cap;
+    scale = governed() && isGL() ? cap * rel : cap;
     const width = Math.max(1, Math.round(w * scale)), height = Math.max(1, Math.round(h * scale));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     renderer.resize?.(width, height);
@@ -101,32 +108,54 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   }
   const rendererReady = () => renderer && (!renderer.ready || renderer.ready());
 
-  function governor(delta) {
-    if (!governed() || sceneTime < 3 || performance.now() < frozenUntil) return;
-    ema = ema * 0.94 + delta * 0.06;
-    const budgetMs = tier.fps === 30 ? [38, 24] : [20, 11];
-    // A steady 33 ms with low variance is a 30 Hz display, not a slow GPU.
-    if (tier.fps === 60 && Math.abs(delta - 33.3) < 2 && Math.abs(ema - 33.3) < 2) { slow = 0; return; }
-    slow = ema > budgetMs[0] ? slow + 1 : 0;
-    fast = ema < budgetMs[1] ? fast + 1 : 0;
+  // One ladder step (dir -1 = cheaper, +1 = richer), clamped to the tier's own maxima.
+  function applyStep(kind, dir) {
+    if (kind === 'rows') { rows = dir < 0 ? Math.max(tier.rowsStart / 8, rows / 2) : Math.min(tier.rowsStart, rows * 2); renderer.setRows?.(rows); return; }
+    if (kind === 'sprites') { const n = (renderer.sprites || 2000) + (dir < 0 ? -500 : 500); renderer.setSprites?.(Math.max(1000, Math.min(tier.sprites || 2000, n))); return; }
+    if (kind === 'mp') { mpScale = dir < 0 ? 0.69 : 1; resize(); return; }
+    if (kind === 'bloom') {
+      quality.bloomLevels = dir < 0 ? Math.max(1, tier.bloomLevels - 1) : tier.bloomLevels;
+      quality.hdrScale = dir < 0 ? tier.hdrScale * 0.75 : tier.hdrScale;
+    } else if (kind === 'jacobi') quality.jacobi = dir < 0 ? Math.max(2, tier.jacobi - 2) : tier.jacobi;
+    else if (kind === 'fluidRes') {
+      const i = FLUID_STEPS.indexOf(quality.fluidRes);
+      quality.fluidRes = dir < 0 ? FLUID_STEPS[Math.max(0, i - 1)] : Math.min(tier.fluidRes, FLUID_STEPS[Math.min(FLUID_STEPS.length - 1, i + 1)]);
+    }
+    renderer.setQuality?.(quality);
+  }
+  function governor(ms) {
+    if (!governed() || !refreshSeen || performance.now() < frozenUntil) return;
+    if (isGL() ? sceneTime < 3 : !(model.state.simulate && sceneTime >= simAt + 1)) return;
+    ema = ema * 0.94 + ms * 0.06;
+    const target = Math.max(tier.fps === 30 || !isGL() ? 1000 / 30 : 1000 / 60, refresh);   // a real 30 Hz / Low Power panel raises the target itself
+    slow = ema > target * 1.2 ? slow + 1 : 0;
+    fast = ema < target * 0.7 ? fast + 1 : 0;
+    const now = performance.now(), ladder = isGL() ? LADDER_GL : LADDER_C2D;
     if (slow > 60) {
       slow = 0;
-      if (scale > cap * 0.56) { scale = Math.max(cap * 0.55, scale * 0.8); resize(); }
-      else if (rows > tier.rowsStart / 4) { rows = Math.max(tier.rowsStart / 4, rows / 2); renderer.setRows?.(rows); frozenUntil = performance.now() + 2000; }
+      if (isGL() && rel > 0.56) { rel = Math.max(0.55, rel * 0.8); resize(); }
+      else if (now >= cooldownUntil && step < ladder.length) { applyStep(ladder[step], -1); step++; cooldownUntil = now + 2000; frozenUntil = now + 2000; }
     } else if (fast > 180) {
       fast = 0;
-      if (rows < tier.rowsStart) { rows = Math.min(tier.rowsStart, rows * 2); renderer.setRows?.(rows); frozenUntil = performance.now() + 2000; }
-      else if (scale < cap) { scale = Math.min(cap, scale * 1.15); resize(); }
+      if (step > 0 && now >= cooldownUntil) { step--; applyStep(ladder[step], +1); cooldownUntil = now + 2000; frozenUntil = now + 2000; }
+      else if (step === 0 && isGL() && rel < 1) { rel = Math.min(1, rel * 1.15); resize(); }
     }
   }
 
-  function updateTick({ delta }) {
+  // Frame gate: draw on whole display refreshes at or above the tier's rate, from the raw rAF interval
+  // (Motion's delta is clamped and resynthesised after a wake).
+  function updateTick() {
     if (!active || lost) return;
+    const now = performance.now(), iv = lastRaf ? Math.min(now - lastRaf, 100) : 1000 / 60;
+    if (lastRaf && iv > 4 && iv < 60) { refresh = refreshSeen ? Math.min(refresh + 0.002, iv) : iv; refreshSeen = true; }
+    lastRaf = now;
     const interval = tier.fps === 30 || renderer?.type === 'canvas2d' ? 1000 / 30 : 1000 / 60;
-    accum += Math.min(delta, 50);
-    drawNow = accum >= interval - 2;
+    period += (iv - period) * 0.05;
+    sinceDraw += iv;
+    const every = Math.max(1, Math.floor(interval / period + 0.15));
+    drawNow = sinceDraw >= (every - 0.5) * period;
     if (!drawNow) return;
-    pendingDelta = Math.min(accum, 100); accum = 0;
+    pendingDelta = Math.min(sinceDraw, 100); sinceDraw = 0;
     if (!rendererReady()) return;
     if (!readyFired) { renderer.warmup?.(); fireReady(); }
     sceneTime += (pendingDelta / 1000) * uniforms.u_motion.value;
@@ -134,14 +163,15 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     model.state.simulate = simAllowed && sceneTime >= simAt;
     model.step(pendingDelta, view);
   }
-  function renderTick({ delta }) {
+  function renderTick() {
     if (!active || lost || !drawNow) return;
     drawNow = false;
     if (!rendererReady()) return;
     renderer.draw(view, pendingDelta);
     labels.position(model.labels, model.cam);
-    governor(delta);
-    if (readoutEl) readoutEl.textContent = `${renderer.type} ${tier.name} ${Math.round(1000 / ema)}fps ${scale.toFixed(2)}x ${canvas.width}x${canvas.height}${rows ? ` rows ${rows}` : ''}${renderer.sprites ? ` sprites ${renderer.sprites}` : ''} | integrity ${model.state.integrity.toFixed(3)} vel ${model.state.vel.toFixed(2)} labels ${model.labels.length}${renderer.glError ? ` | gl ${renderer.glError()}` : ''}`;
+    const now = performance.now(), ms = lastDrawAt ? now - lastDrawAt : 0; lastDrawAt = now;
+    if (ms > 0 && ms < 250) { drawEma = drawEma * 0.9 + ms * 0.1; governor(ms); }
+    if (readoutEl) readoutEl.textContent = `${renderer.type} ${tier.name} ${Math.round(1000 / drawEma)}fps ${scale.toFixed(2)}x ${canvas.width}x${canvas.height}${rows && isGL() ? ` rows ${rows}` : ''}${renderer.sprites ? ` sprites ${renderer.sprites}` : ''}${step ? ` step ${step}` : ''} | integrity ${model.state.integrity.toFixed(3)} vel ${model.state.vel.toFixed(2)} labels ${model.labels.length}${renderer.glError ? ` | gl ${renderer.glError()}` : ''}`;
   }
   function drawStillFrame() {
     if (!renderer || lost) return;
@@ -158,17 +188,18 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (on === active) return;
     active = on;
     canvas.dataset.active = String(on);
-    accum = 0;
+    sinceDraw = 0; lastRaf = 0; lastDrawAt = 0; frozenUntil = performance.now() + 500;
     if (on) { frame.update(updateTick, true); frame.render(renderTick, true); }
     else { cancelFrame(updateTick); cancelFrame(renderTick); drawOnce(); }
   }
 
   watchContext(canvas, {
-    onLost() { lost = true; cancelFrame(updateTick); cancelFrame(renderTick); },
+    onLost() { lost = true; if (renderer) renderer.dead = true; cancelFrame(updateTick); cancelFrame(renderTick); },
     onRestored() {
-      renderer?.destroy?.();
+      if (renderer && !renderer.dead) renderer.destroy?.();          // a dead renderer's objects died with the context
       renderer = createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags, debug }) || null;
       canvas.dataset.renderer = renderer ? renderer.type : 'static';
+      if (renderer) { renderer.setRows?.(rows); renderer.setQuality?.(quality); }
       lost = false; resize();
       if (active) { active = false; setActive(true); } else drawOnce();
     },

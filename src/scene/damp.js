@@ -38,7 +38,8 @@ export function createPointerFilter({ lerpK = 0.05, velGain = 0.035, velFriction
       const t = damp(lerpK, ratio);
       p.sx = lerp(p.sx, p.x, t); p.sy = lerp(p.sy, p.y, t);
       const lag = Math.hypot(p.x - p.sx, p.y - p.sy);
-      p.vel = clamp((p.vel + lag * velGain * ratio) * friction(velFriction, ratio));
+      // Grows with the square of small lags: reading-speed drift stays low, a brisk swipe saturates (stillness reads, motion tears).
+      p.vel = clamp((p.vel + lag * Math.min(3 * lag, 1) * velGain * ratio) * friction(velFriction, ratio));
       return p;
     },
   };

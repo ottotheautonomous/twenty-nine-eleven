@@ -5,8 +5,8 @@ import { hexRGB, COLORS, NODES } from './constants.js';
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
 const TONES = [COLORS.shadow, COLORS.mid, COLORS.hi, COLORS.rim].map(hexRGB);
-const RADII = [2.2, 3.4, 5.2];                       // CSS px; multiplied by the backing scale
-const BUCKETS = [0.08, 0.16, 0.3, 0.5, 0.8];         // globalAlpha per intensity bucket
+const RADII = [2.0, 3.0, 4.0];                       // CSS px; multiplied by the backing scale
+const BUCKETS = [0.06, 0.12, 0.22, 0.35, 0.5];         // globalAlpha per intensity bucket
 
 function makeSprite(r, rgb) {
   const size = Math.ceil(r * 2 + 2), c = document.createElement('canvas');
@@ -23,7 +23,8 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   let ctx;
   try { ctx = canvas.getContext('2d', { alpha: false }); } catch { return null; }
   if (!ctx) return null;
-  let N = Math.min(tier.sprites || 2000, shape.count);
+  const maxN = Math.min(tier.sprites || 2000, shape.count);
+  let N = maxN;
   let ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten, tone, sizeIdx;
   function alloc() {
     [ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten] = Array.from({ length: 12 }, () => new Float32Array(N));
@@ -31,27 +32,26 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   }
   alloc();
   const G = { w: 32, h: 18, vx: new Float32Array(32 * 18), vy: new Float32Array(32 * 18), tx: new Float32Array(32 * 18), ty: new Float32Array(32 * 18) };
-  let sprites = [], spriteScale = 0, haze = null, vignette = null, gradKey = '';
+  let sprites = [], spriteScale = 0, hazeImg = null, hazeR = 0;
   const small = document.createElement('canvas'), sctx = small.getContext('2d');
   const layer = document.createElement('canvas'), lctx = layer.getContext('2d');      // emissive layer on black: bloom adds only light
   const linkBuf = new Float32Array(model.plexus.maxVertices * 4);
   const tmp = [0, 0, 0];
-  let selfTest = { frames: 0, total: 0, done: false };
 
   function ensureSprites(scale) {
     if (scale === spriteScale && sprites.length) return;
     spriteScale = scale;
     sprites = RADII.map((r) => TONES.map((rgb) => makeSprite(r * scale, rgb)));
   }
-  function ensureGradients(W, H, cam) {
-    const key = `${W}x${H}:${Math.round(cam.shellPx.x)},${Math.round(cam.shellPx.y)},${Math.round(cam.shellPx.r)}`;
-    if (key === gradKey) return;
-    gradKey = key;
-    const cx = cam.shellPx.x, cy = H - cam.shellPx.y, R = cam.shellPx.r;
-    haze = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.6);
-    haze.addColorStop(0, '#11151b'); haze.addColorStop(1, 'rgba(10,13,17,0)');
-    vignette = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
-    vignette.addColorStop(0, 'rgba(0,0,0,0)'); vignette.addColorStop(1, 'rgba(0,0,0,0.25)');
+  // The haze is baked once per radius and blitted at the leaned centre: full-canvas gradient fills cost more than the sprites.
+  // The vignette is CSS on this tier (html[data-renderer='canvas2d'] body::before).
+  function ensureHaze(R) {
+    const r = Math.max(2, Math.ceil(R * 2.2));
+    if (hazeImg && hazeR === r) return;
+    hazeR = r; hazeImg = document.createElement('canvas'); hazeImg.width = hazeImg.height = r * 2;
+    const g = hazeImg.getContext('2d'), grad = g.createRadialGradient(r, r, 0, r, r, r);
+    grad.addColorStop(0, '#11151b'); grad.addColorStop(1, 'rgba(10,13,17,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, r * 2, r * 2);
   }
 
   // Velocity grid: capsule splat of the pointer's motion (uv/s, y up), decay, two relaxation passes.
@@ -84,17 +84,16 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   const gridAt = (u, v) => { const x = clamp(Math.floor(u * G.w), 0, G.w - 1), y = clamp(Math.floor(v * G.h), 0, G.h - 1); return y * G.w + x; };
 
   function emberLevel(u, t) {
-    return u.u_ember.value * (1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
+    return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
       * (1 - 0.15 * u.u_tear.value) * (1 + 0.05 * Math.sin(1.9 * t) * u.u_idle.value);
   }
 
   function draw(view, dtMs) {
-    const t0 = performance.now();
     const u = uniforms, motion = u.u_motion.value, ratio = frameRatio(dtMs), dt = Math.min(dtMs, 100) / 1000;
     const cam = model.cam, s = model.state;
     if (!cam.ready) return false;
     const W = canvas.width, H = canvas.height, scale = cam.scaleY || 1;
-    ensureSprites(Math.max(0.75, scale)); ensureGradients(W, H, cam);
+    ensureSprites(Math.max(0.75, scale * Math.min(1, cam.shellPx.r / (135 * scale)))); ensureHaze(cam.shellPx.r);
     const time = model.time;
     if (motion && s.simulate) gridStep(s.trail, dt, ratio, W / H);
     s.trail.pressDisc = false;
@@ -114,7 +113,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const built = smoothstep(sFront - 0.08, sFront, 1.2 * build);
       let px = hx + ox[i], py = hy + oy[i], pz = hz + oz[i];
       if (sim) {
-        const prox = (1 - smoothstep(0.35, 1.2, Math.hypot(px - P[0], py - P[1], pz - P[2]))) * (0.5 + 0.3 * Math.sin(time + r * 12.34) * r);
+        const prox = u.u_present.value * (1 - smoothstep(0.35, 1.2, Math.hypot(px - P[0], py - P[1], pz - P[2]))) * (0.5 + 0.3 * Math.sin(time + r * 12.34) * r);
         const idle = idleU * 0.2 * (0.5 + 0.5 * Math.sin(-2 * time + hx)) * (0.5 + 0.5 * Math.cos(-time)) * (0.5 + 1.5 * r);
         const target = Math.max(idle, prox);
         d1[i] += (target - d1[i]) * k06; d2[i] += (d1[i] - d2[i]) * k06;
@@ -165,7 +164,9 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const sizeF = depth * grow;
       sizeIdx[i] = sizeF < 0.97 ? 0 : sizeF < 1.08 ? 1 : 2;
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
-      inten[i] = built * flick * boost * energy * lit * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
+      const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
+      const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
+      inten[i] = built * flick * boost * energy * lit * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value);
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----
@@ -182,9 +183,9 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
       const a = Math.min(1, lvl);
       g.addColorStop(0, `rgba(255,${Math.round(226 + 10 * warm)},${Math.round(186 + 10 * warm)},${a})`);
-      g.addColorStop(0.07, `rgba(255,216,166,${0.85 * a})`);
-      g.addColorStop(0.2, `rgba(240,166,94,${0.32 * a})`);
-      g.addColorStop(0.5, `rgba(240,166,94,${0.08 * a})`);
+      g.addColorStop(0.04, `rgba(255,216,166,${0.9 * a})`);
+      g.addColorStop(0.12, `rgba(240,166,94,${0.35 * a})`);
+      g.addColorStop(0.3, `rgba(240,166,94,${0.08 * a})`);
       g.addColorStop(1, 'rgba(240,166,94,0)');
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = g; ctx.fillRect(ex - er * 1.6, ey - er * 1.6, er * 3.2, er * 3.2);
@@ -228,7 +229,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     }
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;   // the page canvas
     ctx.fillStyle = '#080a0e'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = haze; ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(hazeImg, cam.shellPx.x + cam.hazePx[0] - hazeR, H - cam.shellPx.y - cam.hazePx[1] - hazeR);
     ctx.globalCompositeOperation = 'lighter';
     ctx.drawImage(layer, 0, 0);
     // bloom: quarter-res copy of the layer's shell box, drawn back softly (never ctx.filter)
@@ -238,18 +239,13 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const qw = Math.max(1, Math.round(bw / 4)), qh = Math.max(1, Math.round(bh / 4));
       if (small.width !== qw || small.height !== qh) { small.width = qw; small.height = qh; }
       sctx.globalCompositeOperation = 'copy'; sctx.drawImage(layer, bx, by, bw, bh, 0, 0, qw, qh);
-      ctx.globalAlpha = 0.5; ctx.drawImage(small, 0, 0, qw, qh, bx, by, bw, bh); ctx.globalAlpha = 1;
+      ctx.globalAlpha = 0.35; ctx.drawImage(small, 0, 0, qw, qh, bx, by, bw, bh); ctx.globalAlpha = 1;
     }
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
     if (u.u_dim.value > 0) { ctx.fillStyle = `rgba(0,0,0,${0.5 * u.u_dim.value})`; ctx.fillRect(0, 0, W, H); }
-    // self-test: drop to 1,500 sprites if the first 20 frames average over 12 ms
-    if (!selfTest.done && motion) {
-      selfTest.total += performance.now() - t0; selfTest.frames++;
-      if (selfTest.frames >= 20) { selfTest.done = true; if (selfTest.total / selfTest.frames > 12 && N > 1500) { N = 1500; alloc(); } }
-    }
     return true;
   }
 
-  return { type: 'canvas2d', software: false, lost: () => false, ready: () => true, resize() { gradKey = ''; }, draw, destroy() {}, get sprites() { return N; } };
+  // The governor lowers the active sprite count without reallocating, so particles keep their state.
+  return { type: 'canvas2d', software: false, lost: () => false, ready: () => true, resize() {}, draw, destroy() {}, setSprites(n) { N = Math.max(250, Math.min(maxN, Math.round(n))); }, get sprites() { return N; } };
 }

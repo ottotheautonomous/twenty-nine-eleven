@@ -26,6 +26,8 @@ export function prepareDecode(el, { lockWidth = false } = {}) {
   if (el.__decode) return el.__decode;
   const text = el.textContent;
   el.textContent = '';
+  // Inside an aria-hidden layer the screen-reader copy is dead DOM that duplicates find/copy text: skip it.
+  const hidden = Boolean(el.closest('[aria-hidden="true"]'));
   const sr = document.createElement('span');
   sr.textContent = text;
   sr.style.cssText = 'position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;';
@@ -48,7 +50,7 @@ export function prepareDecode(el, { lockWidth = false } = {}) {
     }
     ink.appendChild(word);
   }
-  el.append(sr, ink);
+  if (hidden) el.append(ink); else el.append(sr, ink);
   if (lockWidth) for (const c of chars) c.el.style.width = `${c.el.getBoundingClientRect().width}px`;
   return (el.__decode = { el, chars, controls: [], render: null, gen: 0 });
 }
