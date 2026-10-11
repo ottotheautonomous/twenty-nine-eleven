@@ -220,16 +220,16 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     record(now, id, -1, reason, { before });
   }
   function revert(now, id, saved) {
-    const r = RUNGS[id]; r.apply(+1); gov.steps.pop(); r.fails++;
+    const r = RUNGS[id]; r.apply(+1); gov.steps.pop(); r.fails = (r.fails || 0) + 1;   // a registered rung need not declare fails
     gov.locks.set(id, r.fails >= 2 ? Infinity : now + 120000);
     if (gov.mode === 'inferred') { gov.backoffUntil = now + 30000; gov.inferredSheds = Math.max(0, gov.inferredSheds - 1); }
     gov.hist.length = 0; gov.calm = 0; govHold(3000);
     const c = gov.changes.at(-1); if (c?.id === id && c.dir < 0) { c.saved = saved; c.kept = false; }
     record(now, id, +1, `reverted saved ${Math.round(saved * 100)}%`, { saved, kept: false });
   }
-  function restore(now, id) {
+  function restore(now, id, sig) {
     RUNGS[id].apply(+1); gov.steps.pop();
-    gov.probe = { id, wins: 0 }; gov.hist.length = 0; gov.calm = 0; govHold(1500);
+    gov.probe = { id, wins: 0, before: sig }; gov.hist.length = 0; gov.calm = 0; govHold(1500);
     record(now, id, +1, 'restore');
   }
   function judge(w, now) {
@@ -264,6 +264,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (gov.probe) {                                                        // did the restore hurt?
       const p = gov.probe; p.wins++; gov.verdict = 'probe';
       if (v.slow) {
+        const r = RUNGS[p.id], cost = 1 - p.before / Math.max(1e-6, v.sig);    // what the rung really saves, as the restore just showed
+        if (cost > (r.learned ?? r.expect)) r.learned = Math.min(0.9, cost);  // so the next prediction waits for a real drop
         const flips = (gov.flips.get(p.id) || []).filter((t) => now - t < 120000); flips.push(now);
         shed(now, p.id, `restore hurt (flip ${flips.length})`, false);
         if (flips.length >= 3) { gov.pins.set(p.id, now + 600000); gov.flips.delete(p.id); } else gov.flips.set(p.id, flips);
@@ -292,7 +294,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     gov.calm = v.calm ? gov.calm + 1 : v.slow ? 0 : gov.calm;             // mid: neither counts nor resets
     if (gov.probe) return;                                                  // calm keeps counting through a probe: restores ~4.5 s apart
     const need = gov.mode === 'measured' ? (v.fast ? 3 : 5) : 8;
-    if (gov.calm >= need) restore(now, top);
+    if (gov.calm >= need) restore(now, top, v.sig);
   }
 
   // Frame gate: draw on whole display refreshes at or above the tier's rate, from the raw rAF interval and the stable refresh
