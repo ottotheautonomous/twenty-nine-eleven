@@ -70,11 +70,13 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const rafIv = [];                                                         // last 60 raw rAF intervals: the refresh estimate
   const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // tier values; no rung changes them any more
   const xeRows = (tier.rowsStart || 0) > 256;
-  // Rungs are data: visual 0 = invisible … 3 = the identity (thick, dense, crisp strands); target = the signal it relieves; expect =
-  // the share of that signal it should save (measured 1440x900@2). skip() = a no-op from the current state: a rung applies only from
-  // its own "from" state (prevK / prevN), so a locked rung is never jumped over, and a scale rung whose floor-clamped value would not
-  // change the backing is skipped (at dpr 1 both scale rungs skip: resolution is never touched there).
-  // Brain rungs (brainHalf, brainOff, brainPackets, brainNet) register in RUNGS the same way and insert their ids in LADDER below.
+  // Rungs are data. The governor reads only expect (the share of its signal the rung should save, measured 1440x900@2; 0.10 when a
+  // rung omits it), skip() and apply(dir); visual (0 invisible … 3 the identity: thick, dense, crisp strands) and target (the signal
+  // it relieves) are documentation, and the LADDER order below is the whole policy. skip() = a no-op from the current state: a rung
+  // applies only from its own "from" state (prevK / prevN), so a locked rung is never jumped over, and a scale rung whose
+  // floor-clamped value would not change the backing is skipped (at dpr 1 both scale rungs skip: resolution is never touched there).
+  // Brain rungs register the same way, e.g. RUNGS.brainHalf = { id: 'brainHalf', visual: 0, target: 'gpu', expect: 0.10,
+  // skip: () => !brainData, apply(dir) {...} }, and insert their ids in LADDER below.
   const scaleRung = (id, k, prevK, visual, expect) => ({ id, visual, target: 'gpu', expect, fails: 0,
     skip: () => Math.abs(rel - Math.max(1 / cap, prevK)) > 1e-3 || Math.max(k, 1 / cap) >= rel - 1e-3,   // never below 1 backing px per CSS px, nor k × cap
     apply(dir) { rel = Math.max(1 / cap, dir < 0 ? k : prevK); resize(); } });
@@ -86,6 +88,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     scale80: scaleRung('scale80', 0.80, 1.00, 1, 0.10), scale64: scaleRung('scale64', tier.mobile ? 0.60 : 0.64, 0.80, 2, 0.15),
     sprites2000: spritesRung('sprites2000', 2000, 3000, 1, 0.30), sprites1000: spritesRung('sprites1000', 1000, 2000, 2, 0.35),
   };
+  const expectOf = (r) => (Number.isFinite(r.expect) ? r.expect : 0.1);   // a rung registered without a measured share counts as 0.10
   // Particle rows: the tier's own ladder when it has one (tier.rowsLadder, e.g. [768, 512, 256, 128]), else halving from rowsStart
   // down to the floor (xe 128, the others 64): xe 512 -> rows256 -> rows128, uhd/phones 128 -> rows64. Each step is one rung named by
   // the count it lands on. Light is conserved below the 131k reference (webgl.js countGain): fewer rows are sparser, never dimmer.
@@ -187,7 +190,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const c2d = !isGL();
     if (gov.mode === 'measured') {
       if (!Number.isFinite(w.gpuMed)) return { usable: false };
-      const top = gov.steps.at(-1), saved = top ? (RUNGS[top].learned ?? RUNGS[top].expect) : 0, predicted = w.gpuMed / (1 - Math.min(0.9, saved));
+      const top = gov.steps.at(-1), saved = top ? (RUNGS[top].learned ?? expectOf(RUNGS[top])) : 0, predicted = w.gpuMed / (1 - Math.min(0.9, saved));
       return { slow: w.gpuMed >= 0.85 * B, panic: w.gpuMed >= 1.5 * B, calm: predicted <= 0.7 * B, fast: predicted <= 0.5 * B, usable: true };
     }
     const bad = pressure === 'serious' || pressure === 'critical';
@@ -248,7 +251,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (gov.trial) {                                                        // did the step help?
       const t = gov.trial; t.wins.push(v.sig); t.cpu.push(w.cpuMed); t.vs.push(v); gov.verdict = 'trial';
       if (t.wins.length < 2) return;
-      const after = median(t.wins), r = RUNGS[t.id], keep = Math.max(0.06, 0.35 * r.expect);
+      const after = median(t.wins), r = RUNGS[t.id], keep = Math.max(0.06, 0.35 * expectOf(r));
       let saved = 1 - after / Math.max(1e-6, t.before);
       if (gov.mode === 'inferred' && !isGL() && t.cpuBefore > 0) saved = Math.max(saved, 1 - median(t.cpu) / t.cpuBefore);   // C2D: cutting draw CPU is a win too
       if (t.wins.length < 4 && Math.abs(saved - keep) < 0.05) return;     // too close to call on two windows: two more (~2 s)
@@ -265,7 +268,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       const p = gov.probe; p.wins++; gov.verdict = 'probe';
       if (v.slow) {
         const r = RUNGS[p.id], cost = 1 - p.before / Math.max(1e-6, v.sig);    // what the rung really saves, as the restore just showed
-        if (cost > (r.learned ?? r.expect)) r.learned = Math.min(0.9, cost);  // so the next prediction waits for a real drop
+        if (cost > (r.learned ?? expectOf(r))) r.learned = Math.min(0.9, cost);   // so the next prediction waits for a real drop
         const flips = (gov.flips.get(p.id) || []).filter((t) => now - t < 120000); flips.push(now);
         shed(now, p.id, `restore hurt (flip ${flips.length})`, false);
         if (flips.length >= 3) { gov.pins.set(p.id, now + 600000); gov.flips.delete(p.id); } else gov.flips.set(p.id, flips);
