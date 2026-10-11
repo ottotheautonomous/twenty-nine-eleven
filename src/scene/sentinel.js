@@ -192,7 +192,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     }
     const bad = pressure === 'serious' || pressure === 'critical';
     const lagOk = c2d || (Number.isFinite(w.lagMed) && w.lagMed >= 2);
-    const slow = c2d ? (w.cpuMed >= 0.6 * B || w.ivMed >= 1.4 * B) : (w.ivMed >= 1.4 * B && w.cpuMed < 0.5 * B && lagOk && !bad);
+    // C2D: our CPU share counts only while frames are actually late (under contention a 14 ms draw reads 21-25 ms on time)
+    const slow = c2d ? (w.ivMed >= 1.4 * B || (w.cpuMed >= 0.6 * B && w.ivMed >= 1.15 * B)) : (w.ivMed >= 1.4 * B && w.cpuMed < 0.5 * B && lagOk && !bad);
     return { slow, panic: w.ivMed >= 2.0 * B && lagOk, calm: w.ivMed <= 1.1 * B && w.cpuMed < (c2d ? 0.45 : 0.5) * B, fast: false, usable: true };
   }
   function nextRung(now) {
@@ -266,9 +267,9 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       if (p.wins >= 3) gov.probe = null;
     }
     gov.hist.push(v); if (gov.hist.length > 4) gov.hist.shift();
-    const votes = gov.hist.filter((h) => h.slow).length, last2 = gov.hist.slice(-2);
+    const votes = gov.hist.filter((h) => h.slow).length, panics = gov.hist.filter((h) => h.panic).length, last2 = gov.hist.slice(-2);
     const wantShed = gov.mode === 'measured' ? (last2.length === 2 && last2.every((h) => h.slow)) || v.panic
-      : now >= gov.backoffUntil && gov.inferredSheds < 2 && (!idle || v.panic) && votes >= 3;
+      : now >= gov.backoffUntil && gov.inferredSheds < 2 && (!idle || (v.panic && panics >= 2)) && votes >= 3;   // idle: a sustained panic, never one spike
     if (wantShed) {
       const id = nextRung(now);
       if (id) {
