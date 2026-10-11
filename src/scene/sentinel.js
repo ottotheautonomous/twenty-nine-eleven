@@ -176,7 +176,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     for (const s of gpuSamples) if (s.at >= timerReadyAt) w.gpu.push(s.ms);
     if (now - w.t0 < 1000 || w.iv.length < 8) return;
     gov.win = null;
-    const closed = { t: now, n: w.iv.length, ms: now - w.t0, ivMed: median(w.iv), cpuMed: median(w.cpu), gpuMed: w.gpu.length >= 10 ? median(w.gpu) : NaN, lagMed: w.lag.length ? median(w.lag) : NaN };
+    // gpuMed needs 10 timer samples, or all but 2 of the window's frames when it holds fewer (at 7 fps a window closes at 8 frames)
+    const closed = { t: now, n: w.iv.length, ms: now - w.t0, ivMed: median(w.iv), cpuMed: median(w.cpu), gpuMed: w.gpu.length >= Math.min(10, w.iv.length - 2) ? median(w.gpu) : NaN, lagMed: w.lag.length ? median(w.lag) : NaN };
     gov.lastWin = closed;
     judge(closed, now);
   }
