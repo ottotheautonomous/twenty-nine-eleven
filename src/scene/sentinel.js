@@ -237,13 +237,13 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     gov.hist.length = 0; gov.calm = 0; gov.calmCheap = false; govHold(1500);   // the first trial window spans 1-2 s after the step
     record(now, id, -1, reason, { before });
   }
-  function revert(now, id, saved, fail = true) {                           // fail = false: an unreadable trial, no lock
-    const r = RUNGS[id]; r.apply(+1); gov.steps.pop();
+  function revert(now, id, saved, why = 'reverted') {                      // 'inconclusive': an unreadable trial, no lock
+    const r = RUNGS[id], fail = why !== 'inconclusive'; r.apply(+1); gov.steps.pop();
     if (fail) { r.fails = (r.fails || 0) + 1; gov.locks.set(id, r.fails >= 2 ? Infinity : now + 120000); }   // a registered rung need not declare fails
     if (gov.mode === 'inferred') { gov.backoffUntil = now + 30000; gov.inferredSheds = Math.max(0, gov.inferredSheds - 1); }
     gov.hist.length = 0; gov.calm = 0; gov.calmCheap = false; govHold(3000);
     const c = gov.changes.at(-1); if (c?.id === id && c.dir < 0) { c.saved = saved; c.kept = false; }
-    record(now, id, +1, `${fail ? 'reverted' : 'inconclusive'} saved ${Math.round(saved * 100)}%`, { saved, kept: false });
+    record(now, id, +1, `${why} saved ${Math.round(saved * 100)}%`, { saved, kept: false });
   }
   function restore(now, id, sig) {
     RUNGS[id].apply(+1); gov.steps.pop();
@@ -272,8 +272,13 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       if (gov.mode === 'inferred' && !isGL() && t.cpuBefore > 0) saved = Math.max(saved, 1 - median(t.cpu) / t.cpuBefore);   // C2D: cutting draw CPU is a win too
       if (t.wins.length < 4 && Math.abs(saved - keep) < 0.05) return;     // too close to call on two windows: two more (~2 s)
       gov.trial = null;
-      if (gov.mode === 'inferred' && saved > boundOf(r)) revert(now, t.id, saved, false);   // more than the rung can give: the load moved
-      else if (saved >= keep) {
+      // More than the rung can give. Canvas2D: the load moved under the trial (a contention dip), so it is unreadable: undone with no
+      // lock, and a second one on the same rung within 120 s counts as a failed trial (locked), so it cannot loop. GL: intervals land
+      // on whole display refreshes (30 -> 60 fps reads 50 % whatever the rung saves), so the reading is kept, learned at the bound.
+      if (gov.mode === 'inferred' && !isGL() && saved > boundOf(r)) {
+        const again = now - (r.unreadAt ?? -Infinity) < 120000; r.unreadAt = now;
+        revert(now, t.id, saved, again ? 'inconclusive again' : 'inconclusive');
+      } else if (saved >= keep) {
         r.learned = Math.min(saved, boundOf(r)); govHold(3000);
         if (gov.mode === 'inferred') gov.hist = t.vs.slice(-4);              // the kept state's own windows already count as evidence
         const c = gov.changes.at(-1); if (c) { c.after = after; c.saved = saved; c.kept = true; }
