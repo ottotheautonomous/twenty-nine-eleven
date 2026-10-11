@@ -71,24 +71,28 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // tier values; no rung changes them any more
   const xeRows = (tier.rowsStart || 0) > 256;
   // Rungs are data. The governor reads only expect (the share of its signal the rung should save, measured 1440x900@2; 0.10 when a
-  // rung omits it), skip() and apply(dir); visual (0 invisible … 3 the identity: thick, dense, crisp strands) and target (the signal
-  // it relieves) are documentation, and the LADDER order below is the whole policy. skip() = a no-op from the current state: a rung
-  // applies only from its own "from" state (prevK / prevN), so a locked rung is never jumped over, and a scale rung whose
-  // floor-clamped value would not change the backing is skipped (at dpr 1 both scale rungs skip: resolution is never touched there).
+  // rung omits it), max (optional: what it would save if the frame were nothing but what it cuts), skip() and apply(dir); visual
+  // (0 invisible … 3 the identity: thick, dense, crisp strands) and target (the signal it relieves) are documentation, and the
+  // LADDER order below is the whole policy. skip() = a no-op from the current state: a rung applies only from its own "from" state
+  // (prevK / prevN), so a locked rung is never jumped over, and a scale rung whose floor-clamped value would not change the backing
+  // is skipped (at dpr 1 both scale rungs skip: resolution is never touched there).
   // Brain rungs register the same way, e.g. RUNGS.brainHalf = { id: 'brainHalf', visual: 0, target: 'gpu', expect: 0.10,
   // skip: () => !brainData, apply(dir) {...} }, and insert their ids in LADDER below.
-  const scaleRung = (id, k, prevK, visual, expect) => ({ id, visual, target: 'gpu', expect, fails: 0,
+  const scaleRung = (id, k, prevK, visual, expect) => ({ id, visual, target: 'gpu', expect, max: 1 - (k / prevK) ** 2, fails: 0,
     skip: () => Math.abs(rel - Math.max(1 / cap, prevK)) > 1e-3 || Math.max(k, 1 / cap) >= rel - 1e-3,   // never below 1 backing px per CSS px, nor k × cap
     apply(dir) { rel = Math.max(1 / cap, dir < 0 ? k : prevK); resize(); } });
-  const rowsRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'gpu', expect, fails: 0, skip: () => rows !== prevN,
+  const rowsRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'gpu', expect, max: 1 - n / prevN, fails: 0, skip: () => rows !== prevN,
     apply(dir) { rows = dir < 0 ? n : prevN; renderer.setRows?.(rows); } });
-  const spritesRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'cpu', expect, fails: 0, skip: () => renderer.sprites !== prevN,
+  const spritesRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'cpu', expect, max: 1 - n / prevN, fails: 0, skip: () => renderer.sprites !== prevN,
     apply(dir) { renderer.setSprites?.(dir < 0 ? n : prevN); } });
   const RUNGS = {
     scale80: scaleRung('scale80', 0.80, 1.00, 1, 0.10), scale64: scaleRung('scale64', tier.mobile ? 0.60 : 0.64, 0.80, 2, 0.15),
     sprites2000: spritesRung('sprites2000', 2000, 3000, 1, 0.30), sprites1000: spritesRung('sprites1000', 1000, 2000, 2, 0.35),
   };
   const expectOf = (r) => (Number.isFinite(r.expect) ? r.expect : 0.1);   // a rung registered without a measured share counts as 0.10
+  // The most a rung can plausibly save: twice its expected share, or all it cuts (max). A trial reading above that is the load
+  // changing under the trial (a visitor going idle mid-trial), not the rung.
+  const boundOf = (r) => Math.min(0.9, Math.max(2 * expectOf(r), r.max || 0));
   // Particle rows: the tier's own ladder when it has one (tier.rowsLadder, e.g. [768, 512, 256, 128]), else halving from rowsStart
   // down to the floor (xe 128, the others 64): xe 512 -> rows256 -> rows128, uhd/phones 128 -> rows64. Each step is one rung named by
   // the count it lands on. Light is conserved below the 131k reference (webgl.js countGain): fewer rows are sparser, never dimmer.
@@ -163,7 +167,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // slow frames, a deep GPU queue and a light main thread, sheds at most two rungs per session, never while idle short of a panic,
   // and every step is a trial that must save a measurable share within ~3 s or it is undone and locked. Thickness, density and
   // crispness go last and never below the floors (1 backing px per CSS px; xe rows 128, others 64; sprites 1000). Restores are LIFO,
-  // predicted from the saving measured at the shed, and the dead band between "slow" and "calm" keeps it from oscillating.
+  // predicted from the saving measured at the shed, and the dead band between "slow" and "calm" keeps it from oscillating. A saving
+  // is one reading, so it is capped at what the rung can give, and a state at half the budget gets a revertible restore regardless.
   // Statistics are medians of ~1 s windows; start-up, entrance, modal, resize and visibility changes are holds.
   function pushWindow(now, iv, cpu, gpuSamples, lag) {
     const w = gov.win ||= { t0: now, iv: [], cpu: [], gpu: [], lag: [] };
@@ -190,8 +195,11 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const c2d = !isGL();
     if (gov.mode === 'measured') {
       if (!Number.isFinite(w.gpuMed)) return { usable: false };
-      const top = gov.steps.at(-1), saved = top ? (RUNGS[top].learned ?? expectOf(RUNGS[top])) : 0, predicted = w.gpuMed / (1 - Math.min(0.9, saved));
-      return { slow: w.gpuMed >= 0.85 * B, panic: w.gpuMed >= 1.5 * B, calm: predicted <= 0.7 * B, fast: predicted <= 0.5 * B, usable: true };
+      const top = gov.steps.at(-1), r = top && RUNGS[top], predicted = w.gpuMed / (1 - Math.min(0.9, r ? (r.learned ?? expectOf(r)) : 0));
+      // the learned saving can be stale (the load changed under its trial): a state at half the budget gets a revertible restore
+      // whatever the prediction (a restore that hurts is re-shed by the probe), unless a restore of this rung hurt in the last 10 min
+      const cheap = w.gpuMed <= 0.5 * B && w.t - ((top && gov.flips.get(top)?.at(-1)) ?? -Infinity) > 600000;
+      return { slow: w.gpuMed >= 0.85 * B, panic: w.gpuMed >= 1.5 * B, calm: predicted <= 0.7 * B || cheap, fast: predicted <= 0.5 * B, usable: true };
     }
     const bad = pressure === 'serious' || pressure === 'critical';
     const lagOk = c2d || (Number.isFinite(w.lagMed) && w.lagMed >= 2);
@@ -257,7 +265,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       if (t.wins.length < 4 && Math.abs(saved - keep) < 0.05) return;     // too close to call on two windows: two more (~2 s)
       gov.trial = null;
       if (saved >= keep) {
-        r.learned = saved; govHold(3000);
+        r.learned = Math.min(saved, boundOf(r)); govHold(3000);
         if (gov.mode === 'inferred') gov.hist = t.vs.slice(-4);              // the kept state's own windows already count as evidence
         const c = gov.changes.at(-1); if (c) { c.after = after; c.saved = saved; c.kept = true; }
         gov.last += ` saved ${Math.round(saved * 100)}% kept`;
@@ -268,7 +276,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       const p = gov.probe; p.wins++; gov.verdict = 'probe';
       if (v.slow) {
         const r = RUNGS[p.id], cost = 1 - p.before / Math.max(1e-6, v.sig);    // what the rung really saves, as the restore just showed
-        if (cost > (r.learned ?? expectOf(r))) r.learned = Math.min(0.9, cost);   // so the next prediction waits for a real drop
+        if (cost > (r.learned ?? expectOf(r))) r.learned = Math.min(boundOf(r), cost);   // so the next prediction waits for a real drop
         const flips = (gov.flips.get(p.id) || []).filter((t) => now - t < 120000); flips.push(now);
         shed(now, p.id, `restore hurt (flip ${flips.length})`, false);
         if (flips.length >= 3) { gov.pins.set(p.id, now + 600000); gov.flips.delete(p.id); } else gov.flips.set(p.id, flips);
