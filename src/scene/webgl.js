@@ -105,7 +105,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   const colors = { colDark: linearRGB(COLORS.shadow), colLight: linearRGB(COLORS.hi), colFast: linearRGB(COLORS.rim), ember: linearRGB(COLORS.ember), hot: linearRGB(COLORS.hot) };
   const srgb = { ink: hexRGB(COLORS.ink), haze: hexRGB(COLORS.haze), slate: hexRGB(COLORS.slate), accent: hexRGB(COLORS.ember) };
   const inkLinear = linearRGB(COLORS.ink);
-  let W = 1, H = 1, hdr = [null, null], hdrIndex = 0, trail = null, rows = tier.rowsStart, stillSeeded = false, seedBuild = -1, lastError = 0;
+  let W = 1, H = 1, hdr = [null, null], hdrIndex = 0, trail = null, rows = tier.rowsStart, stillSeeded = false, seedBuild = -1, lastError = 0, lastErrorAt = 0;
   let hdrScale = tier.hdrScale, lastW = 1, lastH = 1, forceRealloc = false;
   const bnOffset = [0, 0];
 
@@ -239,7 +239,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     const bloomTex = bloom.render(cur.texture, W, H) || cur.texture;
     composite(cur, bloomTex, cam, u);
     hdrIndex ^= 1;
-    if (view.readout) lastError = gl.getError();          // debug only: getError stalls the pipeline
+    if (view.readout) { const t = performance.now(); if (t - lastErrorAt > 1000) { lastError = gl.getError(); lastErrorAt = t; } }   // debug only, ~1 Hz: getError waits on the GPU process
     return true;
   }
 
