@@ -181,14 +181,17 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     judge(closed, now);
   }
   // Display refresh: the median of the last 60 raw rAF intervals, accepted only as a stable mode (half of them within ±1.5 ms) and
-  // only at a real display period (< 45 ms). A longer period is accepted only while our own frame cost is under half of it, so frames
-  // our GPU paces at 30 fps never pass for a 30 Hz display. Under jank the previous estimate stands.
+  // only at a real display period (< 45 ms). Within ±3 % of the estimate it is jitter and changes nothing (no ratchet). Faster is
+  // always accepted (rAF cannot outpace the display); slower only when our own cost is known and under half the current period, so
+  // frames our GPU paces never pass for a slower display: never in the timer warm-up, never with a deep GPU queue. Under jank the
+  // previous estimate stands.
   function estimateRefresh() {
     if (rafIv.length < 30) return;
     const med = median(rafIv), agree = rafIv.filter((x) => Math.abs(x - med) < 1.5).length / rafIv.length;
-    if (agree < 0.5 || med >= 45) return;
-    const w = gov.lastWin, own = w ? Math.max(Number.isFinite(w.gpuMed) ? w.gpuMed : 0, w.cpuMed || 0) : 0;
-    if (med <= refresh * 1.03 || (own < 0.5 * med && !(w?.lagMed >= 2))) refresh = med;   // faster or jitter: always; slower: only when not ours
+    if (agree < 0.5 || med >= 45 || Math.abs(med - refresh) <= 0.03 * refresh) return;
+    if (med < refresh) { refresh = med; return; }
+    const w = gov.lastWin, own = !w ? NaN : timer ? Math.max(w.gpuMed, w.cpuMed) : fence ? (w.lagMed < 2 ? w.cpuMed : NaN) : w.cpuMed;   // NaN: unknown
+    if (own < 0.5 * refresh) refresh = med;
   }
   const signalOf = (w) => (gov.mode === 'measured' ? w.gpuMed : w.ivMed);
   function classify(w, B) {
