@@ -6,6 +6,7 @@ import { createCanvasRenderer } from './canvas2d.js';
 import { probeGPU, createWebGLRenderer } from './webgl.js';
 import { watchContext } from './gl.js';
 import { LATTICE } from './constants.js';
+import { createGpuTimer, createFenceLag } from './govsignal.js';
 
 // Tier table (start values). side = state texture size allocated once; rows = active prefix (no reallocation).
 // Backing caps are high so hi-DPI screens get native-resolution particles (low caps upscale into blur); the
@@ -62,26 +63,64 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const coarse = matchMedia('(pointer: coarse)');
   let active = false, lost = false, drawNow = false, pendingDelta = 0;
   let sceneTime = 0, simAt = 1.9, simAllowed = false, readyFired = false, readyCbs = [];
-  // Governor state. rel = governed fraction of the DPR cap (GL); the ladder steps quality after the scale floor.
-  let rel = 1, cap = 1, scale = 1, ema = 1000 / 60, frozenUntil = 0, rows = tier.rowsStart || 0;
-  let winMs = 0, winN = 0, calm = 0, backoff = 1, probationUntil = 0;
-  let period = 1000 / 60, sinceDraw = 0, lastRaf = 0, lastDrawAt = 0, refresh = 1000 / 60, refreshSeen = false, drawEma = 1000 / 60;
-  let step = 0, cooldownUntil = 0, mpScale = 1;
-  let stillPending = false, readoutEl = null;
-  const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // per renderer: TIERS stay untouched
-  // Only xe doubled its rows: there the first rung sheds them (before resolution and before HDR softens); other tiers keep v1's order.
+  // Governor state (policy: see the comment above pushWindow). rel = governed fraction of the DPR cap (GL).
+  let rel = 1, cap = 1, scale = 1, rows = tier.rowsStart || 0;
+  let sinceDraw = 0, lastRaf = 0, lastDrawAt = 0, refresh = 1000 / 60, rafCount = 0, drawEma = 1000 / 60;
+  let stillPending = false, readoutEl = null, cpuAcc = 0, timer = null, fence = null, timerReadyAt = Infinity, pressure = 'nominal', pressureOn = false;
+  const rafIv = [];                                                         // last 60 raw rAF intervals: the refresh estimate
+  const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // tier values; no rung changes them any more
   const xeRows = (tier.rowsStart || 0) > 256;
-  const LADDER_GL = xeRows ? ['rows', 'bloom', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'] : ['bloom', 'rows', 'rows', 'rows', 'jacobi', 'fluidRes', 'fluidRes'];
-  const LADDER_C2D = ['sprites', 'sprites', 'mp'];                                         // 3000 -> 2000 -> 1000, then resolution (three rungs, as v1)
-  const FLUID_STEPS = [64, 96, 128];
+  // Rungs are data: visual 0 = invisible … 3 = the identity (thick, dense, crisp strands); target = the signal it relieves; expect =
+  // the share of that signal it should save (measured 1440x900@2). skip() = a no-op from the current state: a rung applies only from
+  // its own "from" state (prevK / prevN), so a locked rung is never jumped over, and a scale rung whose floor-clamped value would not
+  // change the backing is skipped (at dpr 1 both scale rungs skip: resolution is never touched there).
+  // Brain rungs (brainHalf, brainOff, brainPackets, brainNet) register in RUNGS the same way and insert their ids in LADDER below.
+  const scaleRung = (id, k, prevK, visual, expect) => ({ id, visual, target: 'gpu', expect, fails: 0,
+    skip: () => Math.abs(rel - Math.max(1 / cap, prevK)) > 1e-3 || Math.max(k, 1 / cap) >= rel - 1e-3,   // never below 1 backing px per CSS px, nor k × cap
+    apply(dir) { rel = Math.max(1 / cap, dir < 0 ? k : prevK); resize(); } });
+  const rowsRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'gpu', expect, fails: 0, skip: () => rows !== prevN,
+    apply(dir) { rows = dir < 0 ? n : prevN; renderer.setRows?.(rows); } });
+  const spritesRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'cpu', expect, fails: 0, skip: () => renderer.sprites !== prevN,
+    apply(dir) { renderer.setSprites?.(dir < 0 ? n : prevN); } });
+  const RUNGS = {
+    scale80: scaleRung('scale80', 0.80, 1.00, 1, 0.10), scale64: scaleRung('scale64', tier.mobile ? 0.60 : 0.64, 0.80, 2, 0.15),
+    sprites2000: spritesRung('sprites2000', 2000, 3000, 1, 0.30), sprites1000: spritesRung('sprites1000', 1000, 2000, 2, 0.35),
+  };
+  // Particle rows: the tier's own ladder when it has one (tier.rowsLadder, e.g. [768, 512, 256, 128]), else halving from rowsStart
+  // down to the floor (xe 128, the others 64): xe 512 -> rows256 -> rows128, uhd/phones 128 -> rows64. Each step is one rung named by
+  // the count it lands on. Light is conserved below the 131k reference (webgl.js countGain): fewer rows are sparser, never dimmer.
+  const rowsFloor = tier.rowsFloor || (xeRows ? 128 : 64), rowsSteps = tier.rowsLadder ? [...tier.rowsLadder] : [];
+  if (!tier.rowsLadder) for (let n = tier.rowsStart || 0; n >= rowsFloor; n /= 2) rowsSteps.push(n);
+  const rowsIds = rowsSteps.slice(1).map((n, i) => { const id = `rows${n}`, from = rowsSteps[i]; RUNGS[id] = rowsRung(id, n, from, from > 256 ? 2 : 3, from > 256 ? 0.25 : 0.10); return id; });
+  // Ladders: shed in order, restored LIFO. Invisible rungs (the brain's) go first; thickness and crispness go last, mildest first.
+  const LADDER = tier.name === 'c2d' ? ['sprites2000', 'sprites1000']
+    : xeRows ? ['scale80', ...rowsIds.slice(0, 1), 'scale64', ...rowsIds.slice(1)] : ['scale80', ...rowsIds];
+  const gov = { mode: 'off', steps: [], locks: new Map(), pins: new Map(), flips: new Map(), hist: [], calm: 0, holdUntil: 0, backoffUntil: 0,
+    trial: null, probe: null, inferredSheds: 0, last: 'start', verdict: 'hold', win: null, lastWin: null, changes: [], modalSeen: false, modalClearedAt: 0, enteredAt: 0 };
 
   function budget() {
     const w = Math.max(1, canvas.clientWidth || innerWidth), h = Math.max(1, canvas.clientHeight || innerHeight);
-    const mp = (coarse.matches && renderer?.type === 'canvas2d' ? 1.3 : (tier.mpCap || 1.3)) * mpScale * 1e6;
+    const mp = (coarse.matches && renderer?.type === 'canvas2d' ? 1.3 : (tier.mpCap || 1.3)) * 1e6;
     return { w, h, max: Math.sqrt(mp / (w * h)) };
   }
   const isGL = () => renderer?.type === 'webgl2';
   const governed = () => renderer && !params.has('quality') && (isGL() ? !probe.software : true);
+  const budgetMs = () => Math.max(tier.fps === 30 || !isGL() ? 1000 / 30 : 1000 / 60, refresh);
+  const median = (a) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  function attachSignals() {                                              // per renderer (recreated on context restore)
+    timer?.dispose(); fence?.dispose(); timer = fence = null; gov.mode = 'off';
+    if (!renderer) return;
+    // ?notimer (test builds only, like ?quality) forces the inferred path, e.g. for phone-tier tests on a desktop GPU
+    if (isGL() && !probe.software && !params.has('notimer') && (governed() || readout)) timer = createGpuTimer(renderer.gl);
+    if (isGL() && !probe.software && !timer && governed()) fence = createFenceLag(renderer.gl);
+    timerReadyAt = performance.now() + 8000;                                // start-up medians run 2-8 ms for the first 5-8 s
+    if (governed()) gov.mode = timer ? 'measured' : 'inferred';
+    if (gov.mode === 'inferred' && isGL() && !pressureOn) {                // optional (Chrome 125+): a busy machine is not our GPU cost
+      pressureOn = true;
+      try { if ('PressureObserver' in globalThis) new PressureObserver((rs) => { pressure = rs.at(-1)?.state || 'nominal'; }).observe('cpu').catch(() => {}); } catch { /* absent: never "bad" */ }
+    }
+  }
+  const govHold = (ms) => { gov.holdUntil = Math.max(gov.holdUntil, performance.now() + ms); gov.win = null; };   // discards the window in progress
   function project() {
     const sx = canvas.width / Math.max(1, canvas.clientWidth || innerWidth), sy = canvas.height / Math.max(1, canvas.clientHeight || innerHeight);
     view.anchorX = anchor.x * sx; view.anchorY = anchor.y * sy; view.anchorH = Math.max(1, anchor.h * sy);
@@ -97,7 +136,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const width = Math.max(1, Math.round(w * scale)), height = Math.max(1, Math.round(h * scale));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     renderer.resize?.(width, height);
-    frozenUntil = performance.now() + 500;
+    govHold(2000); timerReadyAt = Math.max(timerReadyAt, performance.now() + 1000);   // reallocation: judge no transient
     project();
   }
   function measure() {
@@ -115,63 +154,150 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   }
   const rendererReady = () => renderer && (!renderer.ready || renderer.ready());
 
-  // One ladder step (dir -1 = cheaper, +1 = richer), clamped to the tier's own maxima.
-  function applyStep(kind, dir) {
-    if (kind === 'rows') { rows = dir < 0 ? Math.max(tier.rowsStart / 8, rows / 2) : Math.min(tier.rowsStart, rows * 2); renderer.setRows?.(rows); return; }
-    if (kind === 'sprites') { const n = (renderer.sprites || 3000) + (dir < 0 ? -1000 : 1000); renderer.setSprites?.(Math.max(1000, Math.min(tier.sprites || 3000, n))); return; }
-    if (kind === 'mp') { mpScale = dir < 0 ? 0.69 : 1; resize(); return; }
-    if (kind === 'bloom') {
-      quality.bloomLevels = dir < 0 ? Math.max(1, tier.bloomLevels - 1) : tier.bloomLevels;
-      quality.hdrScale = dir < 0 ? tier.hdrScale * 0.75 : tier.hdrScale;
-    } else if (kind === 'jacobi') quality.jacobi = dir < 0 ? Math.max(2, tier.jacobi - 2) : tier.jacobi;
-    else if (kind === 'fluidRes') {
-      const i = FLUID_STEPS.indexOf(quality.fluidRes);
-      quality.fluidRes = dir < 0 ? FLUID_STEPS[Math.max(0, i - 1)] : Math.min(tier.fluidRes, FLUID_STEPS[Math.min(FLUID_STEPS.length - 1, i + 1)]);
-    }
-    renderer.setQuality?.(quality);
+  // Governor (policy: .review/gov/fable/GOV-SPEC.md). Full quality is the resting state. It acts only on proof that OUR frame is
+  // the bottleneck: measured mode (desktop Chromium) reads our own GPU time per frame from a timer query, so CPU jank from other
+  // processes or another page's GPU load can never shed anything; inferred mode (no timer: Safari, Firefox, phones, Canvas2D) needs
+  // slow frames, a deep GPU queue and a light main thread, sheds at most two rungs per session, never while idle short of a panic,
+  // and every step is a trial that must save a measurable share within ~3 s or it is undone and locked. Thickness, density and
+  // crispness go last and never below the floors (1 backing px per CSS px; xe rows 128, others 64; sprites 1000). Restores are LIFO,
+  // predicted from the saving measured at the shed, and the dead band between "slow" and "calm" keeps it from oscillating.
+  // Statistics are medians of ~1 s windows; start-up, entrance, modal, resize and visibility changes are holds.
+  function pushWindow(now, iv, cpu, gpuSamples, lag) {
+    const w = gov.win ||= { t0: now, iv: [], cpu: [], gpu: [], lag: [] };
+    w.iv.push(iv); w.cpu.push(cpu); if (lag > 0) w.lag.push(lag);
+    for (const s of gpuSamples) if (s.at >= timerReadyAt) w.gpu.push(s.ms);
+    if (now - w.t0 < 1000 || w.iv.length < 8) return;
+    gov.win = null;
+    const closed = { t: now, n: w.iv.length, ms: now - w.t0, ivMed: median(w.iv), cpuMed: median(w.cpu), gpuMed: w.gpu.length >= 10 ? median(w.gpu) : NaN, lagMed: w.lag.length ? median(w.lag) : NaN };
+    gov.lastWin = closed;
+    judge(closed, now);
   }
-  // Governor: judge ~1 s windows of draw-to-draw time against the tier's rate (or the panel's, if slower).
-  // A slow window steps down (scale first on GL, then the ladder); ten calm windows × backoff earn one step back up,
-  // on probation for 30 s (no further promotion meanwhile): a slow window in probation doubles backoff (max 8),
-  // a step that holds halves it.
-  function governor(ms) {
-    if (!governed() || !refreshSeen || performance.now() < frozenUntil) { winMs = winN = 0; return; }
-    if (isGL() ? sceneTime < 3 : !(model.state.simulate && sceneTime >= simAt + 1)) { winMs = winN = 0; return; }
-    ema = ema * 0.94 + ms * 0.06;
-    winMs += ms; if (++winN < (isGL() ? 60 : 30)) return;
-    const mean = winMs / winN; winMs = winN = 0;
-    const target = Math.max(tier.fps === 30 || !isGL() ? 1000 / 30 : 1000 / 60, refresh);
-    const now = performance.now(), ladder = isGL() ? LADDER_GL : LADDER_C2D;
-    if (mean > target * (isGL() ? 1.2 : 1.14)) {
-      calm = 0; if (now < probationUntil) { backoff = Math.min(8, backoff * 2); probationUntil = 0; }
-      // xe sheds its doubled rows before any resolution: native-density pixels are the point of the tier
-      if (isGL() && rel > 0.56 && !(xeRows && step === 0)) { rel = Math.max(0.55, rel * 0.8); resize(); }
-      else if (now >= cooldownUntil && step < ladder.length) { applyStep(ladder[step], -1); step++; cooldownUntil = now + 2000; frozenUntil = now + 2000; }
-    } else if (mean <= target * 1.05) {
-      if (probationUntil && now >= probationUntil) { backoff = Math.max(1, backoff / 2); probationUntil = 0; }
-      if (probationUntil) return;                                           // one promotion at a time: it must hold its 30 s first
-      if (++calm < 10 * backoff || now < cooldownUntil) return;
-      calm = 0;
-      if (isGL() && step > (xeRows ? 1 : 0)) { step--; applyStep(ladder[step], +1); }   // xe: resolution comes back before the doubled rows
-      else if (isGL() && rel < 1) { rel = Math.min(1, rel * 1.15); resize(); }
-      else if (step > 0) { step--; applyStep(ladder[step], +1); }
-      else return;
-      probationUntil = now + 30000; cooldownUntil = now + 2000; frozenUntil = now + 2000;
-    } else calm = 0;
+  // Display refresh: the median of the last 60 raw rAF intervals, accepted only as a stable mode (half of them within ±1.5 ms) and
+  // only at a real display period (< 45 ms). A longer period is accepted only while our own frame cost is under half of it, so frames
+  // our GPU paces at 30 fps never pass for a 30 Hz display. Under jank the previous estimate stands.
+  function estimateRefresh() {
+    if (rafIv.length < 30) return;
+    const med = median(rafIv), agree = rafIv.filter((x) => Math.abs(x - med) < 1.5).length / rafIv.length;
+    if (agree < 0.5 || med >= 45) return;
+    const w = gov.lastWin, own = w ? Math.max(Number.isFinite(w.gpuMed) ? w.gpuMed : 0, w.cpuMed || 0) : 0;
+    if (med <= refresh * 1.03 || (own < 0.5 * med && !(w?.lagMed >= 2))) refresh = med;   // faster or jitter: always; slower: only when not ours
+  }
+  const signalOf = (w) => (gov.mode === 'measured' ? w.gpuMed : w.ivMed);
+  function classify(w, B) {
+    const c2d = !isGL();
+    if (gov.mode === 'measured') {
+      if (!Number.isFinite(w.gpuMed)) return { usable: false };
+      const top = gov.steps.at(-1), saved = top ? (RUNGS[top].learned ?? RUNGS[top].expect) : 0, predicted = w.gpuMed / (1 - Math.min(0.9, saved));
+      return { slow: w.gpuMed >= 0.85 * B, panic: w.gpuMed >= 1.5 * B, calm: predicted <= 0.7 * B, fast: predicted <= 0.5 * B, usable: true };
+    }
+    const bad = pressure === 'serious' || pressure === 'critical';
+    const lagOk = c2d || (Number.isFinite(w.lagMed) && w.lagMed >= 2);
+    const slow = c2d ? (w.cpuMed >= 0.6 * B || w.ivMed >= 1.4 * B) : (w.ivMed >= 1.4 * B && w.cpuMed < 0.5 * B && lagOk && !bad);
+    return { slow, panic: w.ivMed >= 2.0 * B && lagOk, calm: w.ivMed <= 1.1 * B && w.cpuMed < (c2d ? 0.45 : 0.5) * B, fast: false, usable: true };
+  }
+  function nextRung(now) {
+    for (const id of LADDER) {
+      const r = RUNGS[id]; if (!r || gov.steps.includes(id) || r.skip()) continue;
+      const lock = gov.locks.get(id); if (lock && now < lock) continue;
+      return id;
+    }
+    return null;
+  }
+  function record(now, id, dir, reason, extra = {}) {
+    gov.last = `${dir < 0 ? '-' : '+'}${id} @${(now / 1000).toFixed(1)}s ${reason}`;
+    gov.changes.push({ t: Math.round(now), id, dir, reason, ...extra }); if (gov.changes.length > 200) gov.changes.shift();
+  }
+  function shed(now, id, reason, trial = true) {
+    const r = RUNGS[id], recent = gov.hist.slice(-2), med2 = (k) => median(recent.map((h) => h[k]).filter(Number.isFinite));
+    const before = recent.length ? med2('sig') : signalOf(gov.lastWin), cpuBefore = recent.length ? med2('cpu') : gov.lastWin.cpuMed;   // the last two windows, not one
+    r.apply(-1); gov.steps.push(id);
+    gov.trial = trial ? { id, before, cpuBefore, wins: [], cpu: [] } : null; gov.probe = null;
+    gov.hist.length = 0; gov.calm = 0; govHold(1500);                       // the first trial window spans 1-2 s after the step
+    record(now, id, -1, reason, { before });
+  }
+  function revert(now, id, saved) {
+    const r = RUNGS[id]; r.apply(+1); gov.steps.pop(); r.fails++;
+    gov.locks.set(id, r.fails >= 2 ? Infinity : now + 120000);
+    if (gov.mode === 'inferred') { gov.backoffUntil = now + 30000; gov.inferredSheds = Math.max(0, gov.inferredSheds - 1); }
+    gov.hist.length = 0; gov.calm = 0; govHold(3000);
+    const c = gov.changes.at(-1); if (c?.id === id && c.dir < 0) { c.saved = saved; c.kept = false; }
+    record(now, id, +1, `reverted saved ${Math.round(saved * 100)}%`, { saved, kept: false });
+  }
+  function restore(now, id) {
+    RUNGS[id].apply(+1); gov.steps.pop();
+    gov.probe = { id, wins: 0 }; gov.hist.length = 0; gov.calm = 0; govHold(1500);
+    record(now, id, +1, 'restore');
+  }
+  function judge(w, now) {
+    const B = budgetMs();
+    if (!governed() || !readyFired) { gov.verdict = 'off'; return; }
+    if (model.state.modal) { gov.modalSeen = true; gov.verdict = 'modal'; return; }
+    if (gov.modalSeen) { gov.modalSeen = false; gov.modalClearedAt = now; }
+    if (now < gov.modalClearedAt + 3000 || now < gov.holdUntil) { gov.verdict = 'hold'; return; }
+    if (!model.state.entered) { gov.enteredAt = 0; gov.verdict = 'entrance'; return; }
+    gov.enteredAt ||= now;
+    if (now < Math.max(gov.enteredAt + 2000, 10000)) { gov.verdict = 'entrance'; return; }   // and never in the first 10 s after load
+    if (w.ivMed > 250) { gov.verdict = 'throttled'; return; }               // background/occluded rAF: never evidence. A slow device at 6 fps (167 ms) still counts
+    const v = classify(w, B); if (!v.usable) { gov.verdict = 'warmup'; return; }
+    v.sig = signalOf(w); v.cpu = w.cpuMed;
+    const idle = uniforms.u_idle.value > 0.5;
+    if (gov.trial) {                                                        // did the step help?
+      const t = gov.trial; t.wins.push(v.sig); t.cpu.push(w.cpuMed); gov.verdict = 'trial';
+      if (t.wins.length < 2) return;
+      const after = median(t.wins), r = RUNGS[t.id];
+      let saved = 1 - after / Math.max(1e-6, t.before);
+      if (gov.mode === 'inferred' && !isGL() && t.cpuBefore > 0) saved = Math.max(saved, 1 - median(t.cpu) / t.cpuBefore);   // C2D: cutting draw CPU is a win too
+      gov.trial = null;
+      if (saved >= Math.max(0.06, 0.35 * r.expect)) {
+        r.learned = saved; govHold(3000);
+        const c = gov.changes.at(-1); if (c) { c.after = after; c.saved = saved; c.kept = true; }
+        gov.last += ` saved ${Math.round(saved * 100)}% kept`;
+      } else revert(now, t.id, saved);
+      return;
+    }
+    if (gov.probe) {                                                        // did the restore hurt?
+      const p = gov.probe; p.wins++; gov.verdict = 'probe';
+      if (v.slow) {
+        const flips = (gov.flips.get(p.id) || []).filter((t) => now - t < 120000); flips.push(now);
+        shed(now, p.id, `restore hurt (flip ${flips.length})`, false);
+        if (flips.length >= 3) { gov.pins.set(p.id, now + 600000); gov.flips.delete(p.id); } else gov.flips.set(p.id, flips);
+        govHold(3000); return;
+      }
+      if (p.wins >= 3) gov.probe = null;
+    }
+    gov.hist.push(v); if (gov.hist.length > 4) gov.hist.shift();
+    const votes = gov.hist.filter((h) => h.slow).length, last2 = gov.hist.slice(-2);
+    const wantShed = gov.mode === 'measured' ? (last2.length === 2 && last2.every((h) => h.slow)) || v.panic
+      : now >= gov.backoffUntil && gov.inferredSheds < 2 && (!idle || v.panic) && votes >= 3;
+    if (wantShed) {
+      const id = nextRung(now);
+      if (id) {
+        if (gov.mode === 'inferred') gov.inferredSheds++;
+        shed(now, id, v.panic ? 'panic' : gov.mode === 'measured' ? `gpu ${w.gpuMed.toFixed(1)}ms` : `iv ${w.ivMed.toFixed(1)}ms cpu ${w.cpuMed.toFixed(1)}ms lag ${Number.isFinite(w.lagMed) ? w.lagMed : '-'}`);
+        gov.verdict = 'shed'; return;
+      }
+    }
+    gov.verdict = v.slow ? 'slow' : v.calm ? (idle ? 'idle-calm' : 'calm') : 'mid';
+    const top = gov.steps.at(-1);
+    if (!top) return;
+    const pin = gov.pins.get(top); if (pin && now < pin) return;
+    gov.calm = v.calm ? gov.calm + 1 : v.slow ? 0 : gov.calm;             // mid: neither counts nor resets
+    if (gov.probe) return;                                                  // calm keeps counting through a probe: restores ~4.5 s apart
+    const need = gov.mode === 'measured' ? (v.fast ? 3 : 5) : 8;
+    if (gov.calm >= need) restore(now, top);
   }
 
-  // Frame gate: draw on whole display refreshes at or above the tier's rate, from the raw rAF interval
-  // (Motion's delta is clamped and resynthesised after a wake).
+  // Frame gate: draw on whole display refreshes at or above the tier's rate, from the raw rAF interval and the stable refresh
+  // estimate (Motion's delta is clamped and resynthesised after a wake; jank no longer inflates the period).
   function updateTick() {
     if (!active || lost) return;
     const now = performance.now(), iv = lastRaf ? Math.min(now - lastRaf, 100) : 1000 / 60;
-    if (lastRaf && iv > 4 && iv < 60) { refresh = refreshSeen ? Math.min(refresh + 0.002, iv) : iv; refreshSeen = true; }
+    if (lastRaf && iv > 4 && iv < 100) { rafIv.push(iv); if (rafIv.length > 60) rafIv.shift(); if (++rafCount % 30 === 0) estimateRefresh(); }
     lastRaf = now;
     const interval = tier.fps === 30 || renderer?.type === 'canvas2d' ? 1000 / 30 : 1000 / 60;
-    period += (iv - period) * 0.05;
+    const every = Math.max(1, Math.floor(interval / refresh + 0.15));     // whole refreshes per draw: 2 for 30 fps at 60 Hz, 2 for 60 fps at 120 Hz
     sinceDraw += iv;
-    const every = Math.max(1, Math.floor(interval / period + 0.15));
-    drawNow = sinceDraw >= (every - 0.5) * period;
+    drawNow = sinceDraw >= (every - 0.5) * refresh;
     if (!drawNow) return;
     pendingDelta = Math.min(sinceDraw, 100); sinceDraw = 0;
     if (!rendererReady()) return;
@@ -179,17 +305,32 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     sceneTime += (pendingDelta / 1000) * uniforms.u_motion.value;
     view.time += (pendingDelta / 1000) * uniforms.u_motion.value;
     model.state.simulate = simAllowed && sceneTime >= simAt;
-    model.step(pendingDelta, view);
+    const t0 = performance.now(); model.step(pendingDelta, view); cpuAcc = performance.now() - t0;
   }
+  const gpuSamples = [];
   function renderTick() {
     if (!active || lost || !drawNow) return;
     drawNow = false;
     if (!rendererReady()) return;
+    const lag = fence ? fence.tick() : -1;
+    gpuSamples.length = 0; timer?.poll(gpuSamples);
+    const t1 = performance.now();
+    timer?.begin(t1);
     renderer.draw(view, pendingDelta);
+    timer?.end(); fence?.mark();
     labels.position(model.labels, model.cam);
     const now = performance.now(), ms = lastDrawAt ? now - lastDrawAt : 0; lastDrawAt = now;
-    if (ms > 0 && ms < 250) { drawEma = drawEma * 0.9 + ms * 0.1; governor(ms); }
-    if (readoutEl) readoutEl.textContent = `${renderer.type} ${tier.name} ${Math.round(1000 / drawEma)}fps ${scale.toFixed(2)}x ${canvas.width}x${canvas.height}${rows && isGL() ? ` rows ${rows}` : ''}${renderer.sprites ? ` sprites ${renderer.sprites}` : ''}${step ? ` step ${step}` : ''} | integrity ${model.state.integrity.toFixed(3)} vel ${model.state.vel.toFixed(2)} labels ${model.labels.length}${renderer.glError ? ` | gl ${renderer.glError()}` : ''}`;
+    if (ms > 0 && ms < 250) { drawEma = drawEma * 0.9 + ms * 0.1; if (governed() || readout) pushWindow(now, ms, cpuAcc + (now - t1), gpuSamples, lag); }
+    else if (ms >= 250) gov.win = null;                                     // a stall or a throttled (occluded) rAF: never part of a window
+    if (readoutEl) {
+      const w = gov.lastWin, f = (x, d = 1) => (Number.isFinite(x) ? x.toFixed(d) : '—');
+      const stack = gov.steps.length ? gov.steps.join('+') : 'full';
+      const locks = [...gov.locks].filter(([, u]) => now < u).map(([id, u]) => `${id} ${u === Infinity ? 'session' : Math.round((u - now) / 1000) + 's'}`)
+        .concat([...gov.pins].filter(([, u]) => now < u).map(([id, u]) => `pin ${id} ${Math.round((u - now) / 1000)}s`)).join(', ');
+      const signals = `gpu ${f(w?.gpuMed, 2)} iv ${f(w?.ivMed)} cpu ${f(w?.cpuMed)} lag ${f(w?.lagMed, 0)} | B ${budgetMs().toFixed(1)}`;
+      readoutEl.textContent = `${renderer.type} ${tier.name} ${Math.round(1000 / drawEma)}fps ${scale.toFixed(2)}x ${canvas.width}x${canvas.height}${rows && isGL() ? ` rows ${rows}` : ''}${renderer.sprites ? ` sprites ${renderer.sprites}` : ''}${gov.steps.length ? ` step ${gov.steps.length}` : ''} | integrity ${model.state.integrity.toFixed(3)} vel ${model.state.vel.toFixed(2)} labels ${model.labels.length}${renderer.glError ? ` | gl ${renderer.glError()}` : ''}\n`
+        + (gov.mode === 'off' ? `gov off | ${signals}` : `gov ${gov.mode} ${gov.verdict} | ${signals} | ${stack} | last: ${gov.last}${locks ? ` | locks: ${locks}` : ''}`);
+    }
   }
   function drawStillFrame() {
     if (!renderer || lost) return;
@@ -206,18 +347,19 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (on === active) return;
     active = on;
     canvas.dataset.active = String(on);
-    sinceDraw = 0; lastRaf = 0; lastDrawAt = 0; frozenUntil = performance.now() + 500;
+    sinceDraw = 0; lastRaf = 0; lastDrawAt = 0; govHold(3000);             // hidden or shown: judge nothing for 3 s
     if (on) { frame.update(updateTick, true); frame.render(renderTick, true); }
     else { cancelFrame(updateTick); cancelFrame(renderTick); drawOnce(); }
   }
 
   watchContext(canvas, {
-    onLost() { lost = true; if (renderer) renderer.dead = true; cancelFrame(updateTick); cancelFrame(renderTick); },
+    onLost() { lost = true; if (renderer) renderer.dead = true; timer = fence = null; cancelFrame(updateTick); cancelFrame(renderTick); },   // their queries died with the context
     onRestored() {
       if (renderer && !renderer.dead) renderer.destroy?.();          // a dead renderer's objects died with the context
       renderer = createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags, debug }) || null;
       canvas.dataset.renderer = renderer ? renderer.type : 'static';
       if (renderer) { renderer.setRows?.(rows); renderer.setQuality?.(quality); }
+      attachSignals();
       lost = false; resize();
       if (active) { active = false; setActive(true); } else drawOnce();
     },
@@ -227,6 +369,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     readoutEl.style.cssText = 'position:fixed;left:8px;top:8px;z-index:9;margin:0;font:11px monospace;color:#9fb3ae;pointer-events:none;white-space:pre';
     document.body.append(readoutEl);
   }
+  attachSignals();                                                          // after gov and RUNGS exist, before the first resize
   resize();
   measure();
   if (renderer?.type === 'canvas2d') queueMicrotask(fireReady);
@@ -245,6 +388,15 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       if (!ext) return false;
       ext.loseContext(); setTimeout(() => ext.restoreContext(), 300); return true;
     },
-    destroy() { setActive(false); renderer?.destroy?.(); },
+    destroy() { setActive(false); timer?.dispose(); fence?.dispose(); timer = fence = null; renderer?.destroy?.(); },
+    // Governor state for tests and the ?debug readout (window.__tne.scene.govState() in test builds).
+    govState() {
+      const w = gov.lastWin;
+      return { mode: gov.mode, verdict: gov.verdict, B: budgetMs(), refresh, rel, cap, scale, rows, sprites: renderer?.sprites, w: canvas.width, h: canvas.height,
+        ladder: [...LADDER], steps: [...gov.steps], locks: Object.fromEntries(gov.locks), pins: Object.fromEntries(gov.pins),
+        flips: Object.fromEntries([...gov.flips].map(([id, t]) => [id, t.length])), last: gov.last, inferredSheds: gov.inferredSheds,
+        trial: gov.trial && { id: gov.trial.id, before: gov.trial.before, wins: [...gov.trial.wins] }, probe: gov.probe && { ...gov.probe },
+        window: w && { ivMed: w.ivMed, gpuMed: w.gpuMed, cpuMed: w.cpuMed, lagMed: w.lagMed, n: w.n, fps: ((w.n - 1) * 1000) / w.ms }, changes: gov.changes.map((c) => ({ ...c })) };
+    },
   };
 }
