@@ -209,8 +209,10 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     gov.changes.push({ t: Math.round(now), id, dir, reason, ...extra }); if (gov.changes.length > 200) gov.changes.shift();
   }
   function shed(now, id, reason, trial = true) {
-    const r = RUNGS[id], recent = gov.hist.slice(-2), med2 = (k) => median(recent.map((h) => h[k]).filter(Number.isFinite));
-    const before = recent.length ? med2('sig') : signalOf(gov.lastWin), cpuBefore = recent.length ? med2('cpu') : gov.lastWin.cpuMed;   // the last two windows, not one
+    // baseline = the windows that voted (slow or panic) among the last two (measured) or four (inferred), so neither a spike nor a
+    // window from before the load began can fake a saving or a loss
+    const r = RUNGS[id], recent = gov.hist.slice(gov.mode === 'measured' ? -2 : -4).filter((h) => h.slow || h.panic), med2 = (k) => median(recent.map((h) => h[k]).filter(Number.isFinite));
+    const before = recent.length ? med2('sig') : signalOf(gov.lastWin), cpuBefore = recent.length ? med2('cpu') : gov.lastWin.cpuMed;
     r.apply(-1); gov.steps.push(id);
     gov.trial = trial ? { id, before, cpuBefore, wins: [], cpu: [] } : null; gov.probe = null;
     gov.hist.length = 0; gov.calm = 0; govHold(1500);                       // the first trial window spans 1-2 s after the step
@@ -245,11 +247,12 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (gov.trial) {                                                        // did the step help?
       const t = gov.trial; t.wins.push(v.sig); t.cpu.push(w.cpuMed); gov.verdict = 'trial';
       if (t.wins.length < 2) return;
-      const after = median(t.wins), r = RUNGS[t.id];
+      const after = median(t.wins), r = RUNGS[t.id], keep = Math.max(0.06, 0.35 * r.expect);
       let saved = 1 - after / Math.max(1e-6, t.before);
       if (gov.mode === 'inferred' && !isGL() && t.cpuBefore > 0) saved = Math.max(saved, 1 - median(t.cpu) / t.cpuBefore);   // C2D: cutting draw CPU is a win too
+      if (t.wins.length < 4 && Math.abs(saved - keep) < 0.05) return;     // too close to call on two windows: two more (~2 s)
       gov.trial = null;
-      if (saved >= Math.max(0.06, 0.35 * r.expect)) {
+      if (saved >= keep) {
         r.learned = saved; govHold(3000);
         const c = gov.changes.at(-1); if (c) { c.after = after; c.saved = saved; c.kept = true; }
         gov.last += ` saved ${Math.round(saved * 100)}% kept`;
