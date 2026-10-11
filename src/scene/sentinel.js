@@ -193,7 +193,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const bad = pressure === 'serious' || pressure === 'critical';
     const lagOk = c2d || (Number.isFinite(w.lagMed) && w.lagMed >= 2);
     // C2D: our CPU share counts only while frames are actually late (under contention a 14 ms draw reads 21-25 ms on time)
-    const slow = c2d ? (w.ivMed >= 1.4 * B || (w.cpuMed >= 0.6 * B && w.ivMed >= 1.15 * B)) : (w.ivMed >= 1.4 * B && w.cpuMed < 0.5 * B && lagOk && !bad);
+    // GL: a busy main thread is not a GPU cost, unless the GPU queue is 3+ frames deep (a full command buffer blocks our gl calls)
+    const slow = c2d ? (w.ivMed >= 1.4 * B || (w.cpuMed >= 0.6 * B && w.ivMed >= 1.15 * B)) : (w.ivMed >= 1.4 * B && (w.cpuMed < 0.5 * B || w.lagMed >= 3) && lagOk && !bad);
     return { slow, panic: w.ivMed >= 2.0 * B && lagOk, calm: w.ivMed <= 1.1 * B && w.cpuMed < (c2d ? 0.45 : 0.5) * B, fast: false, usable: true };
   }
   function nextRung(now) {
@@ -214,7 +215,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const r = RUNGS[id], recent = gov.hist.slice(gov.mode === 'measured' ? -2 : -4).filter((h) => h.slow || h.panic), med2 = (k) => median(recent.map((h) => h[k]).filter(Number.isFinite));
     const before = recent.length ? med2('sig') : signalOf(gov.lastWin), cpuBefore = recent.length ? med2('cpu') : gov.lastWin.cpuMed;
     r.apply(-1); gov.steps.push(id);
-    gov.trial = trial ? { id, before, cpuBefore, wins: [], cpu: [] } : null; gov.probe = null;
+    gov.trial = trial ? { id, before, cpuBefore, wins: [], cpu: [], vs: [] } : null; gov.probe = null;
     gov.hist.length = 0; gov.calm = 0; govHold(1500);                       // the first trial window spans 1-2 s after the step
     record(now, id, -1, reason, { before });
   }
@@ -245,7 +246,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     v.sig = signalOf(w); v.cpu = w.cpuMed;
     const idle = uniforms.u_idle.value > 0.5;
     if (gov.trial) {                                                        // did the step help?
-      const t = gov.trial; t.wins.push(v.sig); t.cpu.push(w.cpuMed); gov.verdict = 'trial';
+      const t = gov.trial; t.wins.push(v.sig); t.cpu.push(w.cpuMed); t.vs.push(v); gov.verdict = 'trial';
       if (t.wins.length < 2) return;
       const after = median(t.wins), r = RUNGS[t.id], keep = Math.max(0.06, 0.35 * r.expect);
       let saved = 1 - after / Math.max(1e-6, t.before);
@@ -254,6 +255,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       gov.trial = null;
       if (saved >= keep) {
         r.learned = saved; govHold(3000);
+        if (gov.mode === 'inferred') gov.hist = t.vs.slice(-4);              // the kept state's own windows already count as evidence
         const c = gov.changes.at(-1); if (c) { c.after = after; c.saved = saved; c.kept = true; }
         gov.last += ` saved ${Math.round(saved * 100)}% kept`;
       } else revert(now, t.id, saved);
@@ -269,10 +271,12 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       }
       if (p.wins >= 3) gov.probe = null;
     }
-    gov.hist.push(v); if (gov.hist.length > 4) gov.hist.shift();
-    const votes = gov.hist.filter((h) => h.slow).length, panics = gov.hist.filter((h) => h.panic).length, last2 = gov.hist.slice(-2);
+    gov.hist.push(v); if (gov.hist.length > 6) gov.hist.shift();
+    const votes = gov.hist.slice(-4).filter((h) => h.slow).length, last2 = gov.hist.slice(-2);
+    // idle: slow in 5 of the last 6 windows with 2+ panics (iv >= 2 budget): longer than any burst or a 2.5 s sentry pass
+    const sustained = gov.hist.length >= 6 && gov.hist.filter((h) => h.slow).length >= 5 && gov.hist.filter((h) => h.panic).length >= 2;
     const wantShed = gov.mode === 'measured' ? (last2.length === 2 && last2.every((h) => h.slow)) || v.panic
-      : now >= gov.backoffUntil && gov.inferredSheds < 2 && (!idle || (v.panic && panics >= 2)) && votes >= 3;   // idle: a sustained panic, never one spike
+      : now >= gov.backoffUntil && gov.inferredSheds < 2 && (idle ? sustained : votes >= 3);
     if (wantShed) {
       const id = nextRung(now);
       if (id) {
