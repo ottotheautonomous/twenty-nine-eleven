@@ -102,7 +102,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // Ladders: shed in order, restored LIFO. Invisible rungs (the brain's) go first; thickness and crispness go last, mildest first.
   const LADDER = tier.name === 'c2d' ? ['sprites2000', 'sprites1000']
     : xeRows ? ['scale80', ...rowsIds.slice(0, 1), 'scale64', ...rowsIds.slice(1)] : ['scale80', ...rowsIds];
-  const gov = { mode: 'off', steps: [], locks: new Map(), pins: new Map(), flips: new Map(), hist: [], calm: 0, holdUntil: 0, backoffUntil: 0,
+  const gov = { mode: 'off', steps: [], locks: new Map(), pins: new Map(), flips: new Map(), cheapAt: new Map(), hist: [], calm: 0, calmCheap: false, holdUntil: 0, backoffUntil: 0,
     trial: null, probe: null, inferredSheds: 0, last: 'start', verdict: 'hold', win: null, lastWin: null, changes: [], modalSeen: false, modalClearedAt: 0, enteredAt: 0 };
 
   function budget() {
@@ -168,7 +168,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // and every step is a trial that must save a measurable share within ~3 s or it is undone and locked. Thickness, density and
   // crispness go last and never below the floors (1 backing px per CSS px; xe rows 128, others 64; sprites 1000). Restores are LIFO,
   // predicted from the saving measured at the shed, and the dead band between "slow" and "calm" keeps it from oscillating. A saving
-  // is one reading, so it is capped at what the rung can give, and a state at half the budget gets a revertible restore regardless.
+  // is one reading, so it is capped at what the rung can give, and a state at half the budget gets one revertible restore per rung
+  // per 10 min regardless.
   // Statistics are medians of ~1 s windows; start-up, entrance, modal, resize and visibility changes are holds.
   function pushWindow(now, iv, cpu, gpuSamples, lag) {
     const w = gov.win ||= { t0: now, iv: [], cpu: [], gpu: [], lag: [] };
@@ -200,10 +201,12 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (gov.mode === 'measured') {
       if (!Number.isFinite(w.gpuMed)) return { usable: false };
       const top = gov.steps.at(-1), r = top && RUNGS[top], predicted = w.gpuMed / (1 - Math.min(0.9, r ? (r.learned ?? expectOf(r)) : 0));
-      // the learned saving can be stale (the load changed under its trial): a state at half the budget gets a revertible restore
-      // whatever the prediction (a restore that hurts is re-shed by the probe), unless a restore of this rung hurt in the last 10 min
-      const cheap = w.gpuMed <= 0.5 * B && w.t - ((top && gov.flips.get(top)?.at(-1)) ?? -Infinity) > 600000;
-      return { slow: w.gpuMed >= 0.85 * B, panic: w.gpuMed >= 1.5 * B, calm: predicted <= 0.7 * B || cheap, fast: predicted <= 0.5 * B, usable: true };
+      // the learned saving can be stale (the load changed under its trial): a state at half the budget gets one revertible restore
+      // per rung per 10 min whatever the prediction (a restore that hurts is re-shed by the probe; one that only sits below "slow"
+      // is re-shed later with a fresh trial, and it must not come straight back), and none within 10 min of a restore that hurt
+      const lastFlip = top && gov.flips.get(top)?.at(-1), lastCheap = top && gov.cheapAt.get(top), calmP = predicted <= 0.7 * B;
+      const cheap = w.gpuMed <= 0.5 * B && w.t - (lastFlip ?? -Infinity) > 600000 && w.t - (lastCheap ?? -Infinity) > 600000;
+      return { slow: w.gpuMed >= 0.85 * B, panic: w.gpuMed >= 1.5 * B, calm: calmP || cheap, cheapOnly: cheap && !calmP, fast: predicted <= 0.5 * B, usable: true };
     }
     const bad = pressure === 'serious' || pressure === 'critical';
     const lagOk = c2d || (Number.isFinite(w.lagMed) && w.lagMed >= 2);
@@ -231,20 +234,21 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const before = recent.length ? med2('sig') : signalOf(gov.lastWin), cpuBefore = recent.length ? med2('cpu') : gov.lastWin.cpuMed;
     r.apply(-1); gov.steps.push(id);
     gov.trial = trial ? { id, before, cpuBefore, wins: [], cpu: [], vs: [] } : null; gov.probe = null;
-    gov.hist.length = 0; gov.calm = 0; govHold(1500);                       // the first trial window spans 1-2 s after the step
+    gov.hist.length = 0; gov.calm = 0; gov.calmCheap = false; govHold(1500);   // the first trial window spans 1-2 s after the step
     record(now, id, -1, reason, { before });
   }
   function revert(now, id, saved, fail = true) {                           // fail = false: an unreadable trial, no lock
     const r = RUNGS[id]; r.apply(+1); gov.steps.pop();
     if (fail) { r.fails = (r.fails || 0) + 1; gov.locks.set(id, r.fails >= 2 ? Infinity : now + 120000); }   // a registered rung need not declare fails
     if (gov.mode === 'inferred') { gov.backoffUntil = now + 30000; gov.inferredSheds = Math.max(0, gov.inferredSheds - 1); }
-    gov.hist.length = 0; gov.calm = 0; govHold(3000);
+    gov.hist.length = 0; gov.calm = 0; gov.calmCheap = false; govHold(3000);
     const c = gov.changes.at(-1); if (c?.id === id && c.dir < 0) { c.saved = saved; c.kept = false; }
     record(now, id, +1, `${fail ? 'reverted' : 'inconclusive'} saved ${Math.round(saved * 100)}%`, { saved, kept: false });
   }
   function restore(now, id, sig) {
     RUNGS[id].apply(+1); gov.steps.pop();
-    gov.probe = { id, wins: 0, before: sig }; gov.hist.length = 0; gov.calm = 0; govHold(1500);
+    if (gov.calmCheap) gov.cheapAt.set(id, now);                            // the half-budget re-measure: once per rung per 10 min
+    gov.probe = { id, wins: 0, before: sig }; gov.hist.length = 0; gov.calm = 0; gov.calmCheap = false; govHold(1500);
     record(now, id, +1, 'restore');
   }
   function judge(w, now) {
@@ -309,6 +313,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (!top) return;
     const pin = gov.pins.get(top); if (pin && now < pin) return;
     gov.calm = v.calm ? gov.calm + 1 : v.slow ? 0 : gov.calm;             // mid: neither counts nor resets
+    gov.calmCheap = gov.calm > 0 && (gov.calmCheap || Boolean(v.cheapOnly));   // a counted window that only the half-budget rule made calm
     if (gov.probe) return;                                                  // calm keeps counting through a probe: restores ~4.5 s apart
     const need = gov.mode === 'measured' ? (v.fast ? 3 : 5) : 8;
     if (gov.calm >= need) restore(now, top, v.sig);
@@ -421,7 +426,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       const w = gov.lastWin;
       return { mode: gov.mode, verdict: gov.verdict, B: budgetMs(), refresh, rel, cap, scale, rows, sprites: renderer?.sprites, w: canvas.width, h: canvas.height,
         ladder: [...LADDER], steps: [...gov.steps], locks: Object.fromEntries(gov.locks), pins: Object.fromEntries(gov.pins),
-        flips: Object.fromEntries([...gov.flips].map(([id, t]) => [id, t.length])), last: gov.last, inferredSheds: gov.inferredSheds,
+        flips: Object.fromEntries([...gov.flips].map(([id, t]) => [id, t.length])), cheapAt: Object.fromEntries(gov.cheapAt), last: gov.last, inferredSheds: gov.inferredSheds,
         trial: gov.trial && { id: gov.trial.id, before: gov.trial.before, wins: [...gov.trial.wins] }, probe: gov.probe && { ...gov.probe },
         window: w && { ivMed: w.ivMed, gpuMed: w.gpuMed, cpuMed: w.cpuMed, lagMed: w.lagMed, n: w.n, fps: ((w.n - 1) * 1000) / w.ms }, changes: gov.changes.map((c) => ({ ...c })) };
     },
