@@ -180,11 +180,12 @@ function applyMotionPolicy() {
 
 // Idle: after four quiet seconds the camera drifts on a slow Lissajous, the lattice breathes in a travelling
 // wave and a sentry band crosses the cage every ~9 s. Any input hands control back in one frame.
+let idleHeading = 0;   // the idle tween's last target: re-sending it on every input would restart the tween and hold the drift on
 function noteActivity() {
   if (!idleArmed) return;
-  if (idle.get() !== 0) idle.set(0);
+  if (idleHeading !== 0) { idleHeading = 0; idle.set(0); }
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if (!still() && modalState === 'closed') idle.set(1); }, 4000);
+  idleTimer = setTimeout(() => { if (!still() && modalState === 'closed') { idleHeading = 1; idle.set(1); } }, 4000);
 }
 function armIdle() { idleArmed = true; noteActivity(); }
 function sentryPass() { animate(uniforms, { u_sentry: [0.001, 1] }, { duration: 2.5, ease: 'linear' }).then(() => animate(uniforms, { u_sentry: 0 }, { duration: 0 })); }

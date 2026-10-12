@@ -31,7 +31,9 @@ export const uniforms = {
 };
 
 export const engage = springValue(0, { stiffness: 75, damping: 21 });
-export const idle = followValue(0, { type: 'tween', duration: 2, ease: 'easeInOut' });
+// followValue hands its options straight to the generator, which counts milliseconds (duration: 2 was a 2 ms snap: the idle
+// drift jolted the camera on at full amplitude 4 s after the last input).
+export const idle = followValue(0, { type: 'tween', duration: 2000, ease: 'easeInOut' });
 threeEffect(uniforms, { u_engage: engage, u_idle: idle });
 
 // Final entrance values, used for reduced motion and as the still frame.
