@@ -100,15 +100,17 @@ extra is a row in Supabase's migration history. If that is wanted anyway, use ap
 
 ### 4c. Database checks straight after
 
-1. Paste `supabase/verify/live_checks.sql` into the SQL Editor and Run. One row per check. **Acceptance: rows 1-13 PASS, no FAIL.** Read the INFO rows: 14
-   (exposed schemas as recorded on the role; otherwise confirm the Dashboard setting from section 3), 15 (roles that bypass
-   RLS: `postgres`, `service_role` and Supabase's internal roles), 16 (`enquiries=0`).
-2. **Security Advisor**: Dashboard → Advisors → Security Advisor → Rerun. **Acceptance: 0 ERROR, 0 WARN.** Expected and accepted by design: two INFO `rls_enabled_no_policy` findings, one per
-   `intake` table (RLS with no policy is exactly "nobody but the owner"). The same linter reports exactly that on the offline
-   stand-in. The Dashboard's Security Advisor can also list Auth-configuration findings that are not about the database (for
-   example leaked-password protection, which may need a paid plan). Fix any that the plan allows. If one cannot be fixed on
-   Free, the owner decides whether to accept it (Auth is unused, sign-ups are off), and the lead records the finding, the
-   reason and the owner's initials in `VALIDATION.md`. Any database-level WARN or ERROR is a stop: do not continue.
+1. Paste `supabase/verify/live_checks.sql` into the SQL Editor and Run. One row per check. **Acceptance: rows 1-13 PASS, no
+   FAIL.** Read the INFO rows: 14 (exposed schemas as recorded on the role; otherwise confirm the Dashboard setting from
+   section 3; the live proof is the probe in section 7 step 2), 15 (roles that bypass RLS: `postgres`, `service_role` and
+   Supabase's internal roles), 16 (`enquiries=0`).
+2. **Security Advisor**: Dashboard → Advisors → Security Advisor → Rerun. **Acceptance: 0 ERROR, 0 WARN.** Expected and
+   accepted by design: two INFO `rls_enabled_no_policy` findings, one per `intake` table (RLS with no policy is exactly
+   "nobody but the owner"). The same linter reports exactly that on the offline stand-in. The Dashboard's Security Advisor
+   can also list Auth-configuration findings that are not about the database (for example leaked-password protection, which
+   may need a paid plan). Fix any that the plan allows. If one cannot be fixed on Free, the owner decides whether to accept
+   it (Auth is unused, sign-ups are off), and the lead records the finding, the reason and the owner's initials in
+   `VALIDATION.md`. Any database-level WARN or ERROR is a stop: do not continue.
 
 ## 5. The Worker's secret key (owner, Dashboard)
 
@@ -156,7 +158,12 @@ Record the date and the outcome of each step in `VALIDATION.md`. The form is not
    and to call both functions, with no key, with the publishable key as `apikey` and as a Bearer token, and with a random
    `sb_secret_` key. It checks that the OpenAPI description and GraphQL show nothing of the intake, and that the Worker refuses
    foreign origins and is configured (bad JSON from `www` gives 400; a 503 there means a secret is missing or malformed). It
-   prints status codes only and stores nothing.
+   prints status codes and PostgREST error codes only, and stores nothing.
+   **This is the live proof that `intake` is not exposed:** with the publishable key, every request that switches to the
+   `intake` profile must answer exactly `406 PGRST106` (PostgREST: the schema "is not present in the db-schemas configuration
+   variable"). A `401 42501` on such a line means `intake` **is exposed** (the request reached the privilege check): stop,
+   remove `intake` from Exposed schemas (section 3 step 2), and run the probe again. With the key also sent as a Bearer
+   token, a 401 before any schema is chosen is accepted; the apikey-only lines carry the proof.
 3. **The secret key stores exactly one test row**: from https://www.twentynineeleven.net send one enquiry the owner authorizes:
    name `Smith, John`, the owner's own email, a two-line message with an emoji. The page must show its thank-you state. The
    Worker is the only holder of the key, so this is the secret-key RPC test; the key never comes to this machine. In the SQL Editor:
@@ -323,7 +330,8 @@ and while that token exists it can run SQL on the database, which means reading 
 - PostgreSQL, Row security policies ("Superusers and roles with the BYPASSRLS attribute always bypass the row security system";
   FORCE ROW LEVEL SECURITY; default deny): https://www.postgresql.org/docs/current/ddl-rowsecurity.html
 - PostgreSQL, ALTER DEFAULT PRIVILEGES ("you cannot revoke privileges per-schema if they are granted globally"): https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html
-- PostgREST, functions and errors (void functions answer 204; 42501 → 401/403): https://docs.postgrest.org/en/latest/references/api/functions.html · https://docs.postgrest.org/en/latest/references/errors.html
+- PostgREST, functions and errors (void functions answer 204; 42501 → "if authenticated 403, else 401"; PGRST106 → 406 for
+  a schema not in db-schemas): https://docs.postgrest.org/en/latest/references/api/functions.html · https://docs.postgrest.org/en/latest/references/errors.html
 - Cloudflare, Secrets (`secrets.required`; `wrangler secret put` deploys a new version): https://developers.cloudflare.com/workers/configuration/secrets/
 - Cloudflare, Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
 - Wrangler 4.149.0 source, read offline: the first-deploy refusal with required secrets, and the placeholder Worker that
