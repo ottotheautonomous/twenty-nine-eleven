@@ -8,7 +8,7 @@ computer or local file: those details live in the lead's untracked notes and the
 ## What this builds
 
 The page's contact form already posts to the Cloudflare Worker at `https://contact.twentynineeleven.net/api/contact`. The
-Worker keeps every protection it had (origin allow-list incl. `www`, per-IP and shared rate limits, Turnstile (section 8),
+Worker keeps every protection it had (origin allow-list incl. `www`, per-IP and shared rate limits, Turnstile (set up in section 6),
 validation, honeypot, body caps, fail-closed 503s) and, instead of sending an email, makes **one** call to one database
 function in the owner's own Free Supabase project. Nothing about DNS or mail changes.
 
@@ -138,12 +138,27 @@ extra is a row in Supabase's migration history. If that is wanted anyway, use ap
    until you disable them". The Worker refuses legacy keys anyway.
 3. Note the **publishable key** (`sb_publishable_...`). It is designed to be public; the lead uses it for the probe in section 7.
 
-## 6. Cloudflare: secrets, then deploy (lead, owner present)
+## 6. Cloudflare: Turnstile, merge, secrets, then deploy (lead, owner present)
 
-**Merge `contact-supabase` into `main` first, and run these commands from an up-to-date checkout of `main`.** Until `main`
-contains this branch, do not run the GitHub Actions deploy (**Actions → Deploy contact service to Cloudflare**): it deploys
-whatever `main` holds, which is still the old email Worker, and every enquiry would fail with 503. Pushing `main` also
-republishes the page through the Pages workflow; this branch does not change the page.
+Turnstile is set up here, before the first deploy, so the live form never accepts an enquiry without the bot check (why:
+section 8). The order is page first, then secret: the Pages build already passes the repository variable to the page
+(`VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY || '' }}` in `.github/workflows/pages.yml`), and the Worker ignores
+the token while `TURNSTILE_SECRET` is unset, so a live page with the site key is always safe. A secret without that page
+would refuse every visitor.
+
+1. **Before the merge: the widget and the site key** (owner). Cloudflare dashboard → **Turnstile → Add widget**: name
+   `twenty nine eleven contact`; hostnames exactly those in `TURNSTILE_HOSTNAMES` in `wrangler.jsonc`; widget mode
+   **Invisible**. Put the **site key** (public) in the GitHub repository under **Settings → Secrets and variables → Actions →
+   Variables** as `TURNSTILE_SITE_KEY`. The widget's **secret key** goes only to the hidden prompt in step 3: not the password
+   manager, a file or chat. If the dashboard no longer shows it by then, use the widget's **Settings → Rotate Secret Key** and
+   paste the new one.
+2. **Merge `contact-supabase` into `main`.** Pushing `main` runs the Pages workflow, which republishes the page with the site
+   key. Until `main` contains this branch, never run the GitHub Actions deploy (**Actions → Deploy contact service to
+   Cloudflare**): it deploys whatever `main` holds, which is still the old email Worker, and every enquiry would fail with
+   503. Once the Pages run has finished, confirm the live page carries the site key (key-free; GitHub Pages can serve the old
+   page from cache for up to 10 minutes): `curl -fsS https://www.twentynineeleven.net/ | grep -c 'frame-src https://challenges.cloudflare.com'`
+   must print `1`. The page's Content-Security-Policy names Cloudflare's frame only when the build had the site key.
+3. **From an up-to-date checkout of `main`**, with the page from step 2 live:
 
 ```sh
 npx wrangler login && npx wrangler whoami         # the owner signs in: the account that holds twentynineeleven.net
@@ -151,28 +166,30 @@ npx wrangler secret put SUPABASE_URL              # 1st time: "There doesn't see
                                                   #  Do you want to create a new Worker with that name and add secrets to it?" -> y
                                                   #  then paste https://<ref>.supabase.co at the hidden prompt
 npx wrangler secret put SUPABASE_SECRET_KEY       # the OWNER copies the key from the Dashboard and pastes it at the hidden prompt
-npx wrangler secret list                          # names only: SUPABASE_SECRET_KEY, SUPABASE_URL
+npx wrangler secret put TURNSTILE_SECRET          # the page with the site key is live (step 2); the OWNER copies the widget's
+                                                  #  secret key from the Turnstile dashboard and pastes it at the hidden prompt
+npx wrangler secret list                          # names only: SUPABASE_SECRET_KEY, SUPABASE_URL, TURNSTILE_SECRET
 npm run check && npm run contact:check && npm run contact:deploy
 npx wrangler logout                               # revokes the session: none stays on this computer
 ```
 
-- The order matters. `wrangler.jsonc` lists both names under `secrets.required`, so `wrangler deploy` refuses to deploy
-  without them, and for a Worker that does not exist yet it refuses outright ("This Worker does not exist yet, so secrets
+- The order matters. `wrangler.jsonc` lists the two Supabase names under `secrets.required`, so `wrangler deploy` refuses to
+  deploy without them, and for a Worker that does not exist yet it refuses outright ("This Worker does not exist yet, so secrets
   cannot be set in advance ... supply them via a secrets file"). We never put the key in a file. Instead, `secret put` first
-  creates a placeholder Worker that only holds the secrets, and the real deploy then inherits them.
-- After pasting the key: if a clipboard manager is running, delete the entry, then copy something harmless.
+  creates a placeholder Worker that only holds the secrets, and the real deploy then inherits all three.
+- After pasting each key: if a clipboard manager is running, delete the entry, then copy something harmless.
 - `SUPABASE_URL` is not a credential, but the repository is public, so the project ref stays out of it.
 - The deploy creates the custom domain `contact.twentynineeleven.net` (as before) and one Cron Trigger (`17 3,11,19 * * *`
   UTC). Cron changes can take up to 15 minutes to take effect.
 - Later redeploys, always from `main` after the merge: `npm run contact:deploy`, or **Actions → Deploy contact service to
   Cloudflare** once `CLOUDFLARE_API_TOKEN` (scoped to this account's Workers and this zone) and `CLOUDFLARE_ACCOUNT_ID` are
-  repository secrets. Secrets carry over to each new version. The Supabase key never goes to GitHub.
+  repository secrets. Secrets carry over to each new version. The Supabase key and the Turnstile secret never go to GitHub.
+- Changing the widget's hostnames later: keep them equal to `TURNSTILE_HOSTNAMES` (the Worker checks the token's hostname).
 - If appendix A's CLI path was used, finish its cleanup (appendix A step 4) now. `supabase logout` alone revokes nothing.
 
 ## 7. LIVE verification (lead; all of it, in order)
 
-Record the date and the outcome of each step in `VALIDATION.md`. The form is not operational until steps 1-5 pass **and
-Turnstile is on (section 8, required)**.
+Record the date and the outcome of each step in `VALIDATION.md`. The form is operational when steps 1-5 pass.
 
 1. **Database checks**: re-run `supabase/verify/live_checks.sql` (section 4c). No FAIL.
 2. **No key, publishable key, and a made-up secret key all fail**:
@@ -188,8 +205,9 @@ Turnstile is on (section 8, required)**.
    remove `intake` from Exposed schemas (section 3 step 2), and run the probe again. With the key also sent as a Bearer
    token, a 401 before any schema is chosen is accepted; the apikey-only lines carry the proof.
 3. **The secret key stores exactly one test row**: from https://www.twentynineeleven.net send one enquiry the owner authorizes:
-   name `Smith, John`, the owner's own email, a two-line message with an emoji. The page must show its thank-you state. The
-   Worker is the only holder of the key, so this is the secret-key RPC test; the key never comes to this machine. In the SQL Editor:
+   name `Smith, John`, the owner's own email, a two-line message with an emoji. The page must show its thank-you state, which
+   also proves that the bot check passes for a real browser. The Worker is the only holder of the key, so this is the
+   secret-key RPC test; the key never comes to this machine. In the SQL Editor:
    `select id, created_at, name, email, char_length(message) as chars, source from intake.contact_submissions order by id desc limit 3;`
    Expect one row with `source = www.twentynineeleven.net`, and the name and message exactly as typed.
 4. **Still nothing readable through the API with a row present**: run step 2 again (identical result) and
@@ -198,32 +216,27 @@ Turnstile is on (section 8, required)**.
 6. **Keep-alive**: after the next 03:17, 11:17 or 19:17 UTC, `select beat_at from intake.keepalive;` has moved, and the
    Worker's Cron Triggers page in the Cloudflare dashboard shows a successful run.
 7. **Account hygiene**, ticked by the owner: Supabase MFA on; second MFA factor registered on a different device or app;
-   organization = owner only; Enforce SSL on; network restrictions
-   applied (the two documentation entries shown as applied, not the default empty list) and the SQL Editor still answers
-   `select 1;` (or the reason they are off recorded in `VALIDATION.md`, section 3 step 4); the database password only in the password manager, no plain-text copy left, and
+   organization = owner only; Enforce SSL on; network restrictions applied (the two documentation entries shown as applied,
+   not the default empty list) and the SQL Editor still answers `select 1;` (or the reason they are off recorded in
+   `VALIDATION.md`, section 3 step 4); the database password only in the password manager, no plain-text copy left, and
    reset after any plain-text exposure (section 1); legacy JWT keys disabled; Auth sign-ups off; exposed schemas =
-   `public, graphql_public`; Cloudflare account MFA on; Wrangler logged out on this computer; **Supabase Account → Access Tokens
-   (https://supabase.com/dashboard/account/tokens) lists no token created for this setup** (no `cli_…` token from a
-   `supabase login`, no token from appendix A), and the checkout has no `supabase/.temp`.
+   `public, graphql_public`; `TURNSTILE_SECRET` listed by `wrangler secret list` in section 6 (or under the Worker's Settings →
+   Variables and Secrets in the Cloudflare dashboard); Cloudflare account MFA on; Wrangler logged out on this computer;
+   **Supabase Account → Access Tokens (https://supabase.com/dashboard/account/tokens) lists no token created for this setup**
+   (no `cli_…` token from a `supabase login`, no token from appendix A), and the checkout has no `supabase/.temp`.
 8. Optional: delete the test row in the SQL Editor (`delete from intake.contact_submissions where id = <n>;`; only the owner
-   can). Then add a dated line to `VALIDATION.md`: "live enquiry storage verified".
+   can). Then add a dated line to `VALIDATION.md`: "live enquiry storage verified, Turnstile on".
 
-## 8. Turnstile: required before the form is called operational
+## 8. Turnstile: why it is on from the first deploy
+
+Turnstile is set up in section 6, before the first deploy, so the form never accepts an enquiry without the bot check; keep
+the widget hostnames equal to `TURNSTILE_HOSTNAMES`.
 
 Without Turnstile, a script can send valid-looking enquiries, and the Worker's rate limits do not stop a determined one:
 Cloudflare's rate-limit binding is "local to the Cloudflare location" and "permissive, eventually consistent", and a few
 addresses (or one IPv6 /62) can keep the shared 20-a-minute cap busy all day. The database's own cap (300 new enquiries per
 24 hours, section 9) keeps such a flood from filling the Free plan's 500 MB, but junk can still use up the cap and lock real
 visitors out until it is deleted or ages out. Turnstile makes every enquiry carry a fresh, single-use proof from a real browser.
-
-1. As in `DEPLOY.md` section 3: create the widget (hostnames: `www.twentynineeleven.net`, `twentynineeleven.net`, plus any
-   GitHub Pages host still in use; they must match `TURNSTILE_HOSTNAMES` in `wrangler.jsonc`), set the repository variable
-   `TURNSTILE_SITE_KEY`, and republish the page.
-2. Only once the page with the site key is live: `npx wrangler secret put TURNSTILE_SECRET` (the owner pastes the secret at
-   the hidden prompt). Before that, real visitors would be refused.
-3. `npx wrangler secret list` shows `SUPABASE_SECRET_KEY`, `SUPABASE_URL` and `TURNSTILE_SECRET`. Re-run section 7 step 2,
-   then send one more authorized enquiry from the live page (it must reach the thank-you state) and confirm its row as in
-   section 7 step 3. Record "Turnstile on" with the date in `VALIDATION.md`.
 
 ## 9. Rotating the secret key, and what to do if it leaks
 
@@ -396,6 +409,10 @@ and while that token exists it can run SQL on the database, which means reading 
 - Cloudflare, Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
 - Cloudflare, Rate Limiting binding ("local to the Cloudflare location"; "permissive, eventually consistent"):
   https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+- Cloudflare, Turnstile widget management (hostnames are the "Domains where the widget will be used"; modes Managed,
+  Non-Interactive, Invisible) and rotating the secret key (Settings → Rotate Secret Key):
+  https://developers.cloudflare.com/turnstile/get-started/widget-management/dashboard/ ·
+  https://developers.cloudflare.com/turnstile/troubleshooting/rotate-secret-key/
 - Supabase, Database size (Free projects "enter read-only mode when your database size exceeds 500 MB"; the SQL to leave
   it): https://supabase.com/docs/guides/platform/database-size
 - PostgREST, raising `PTxyz` sets the HTTP status (`PT429` → 429): https://docs.postgrest.org/en/latest/references/errors.html
