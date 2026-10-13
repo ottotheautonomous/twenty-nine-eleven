@@ -6,6 +6,19 @@ import { TIER0 } from './shape.js';
 // DOM readouts, the corner instrument, the tier-0 label and the finding dot. Positions are plain transforms
 // written in frame.render; every opacity change and scramble is a Motion animation (decode.js).
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// The short-landscape layout (style.css, the same query): the cage sits in a left column, so the readings take the phone's
+// caption mode (one reading, centred above the cage) instead of the desktop columns beside it, which would run into the copy.
+const shortLandscape = matchMedia('(orientation: landscape) and (max-height: 600px)');
+// A reading too wide for the cage's column (short landscape under ~640 px wide: the longest readings) is set as two lines,
+// split at the separator that leaves the longer line shortest (mono: characters are width).
+function splitReading(line) {
+  const parts = line.split(' · '), join = (a, b) => parts.slice(a, b).join(' · ');
+  let best = [line], longest = Infinity;
+  for (let k = 1; k < parts.length; k++) { const l = Math.max(join(0, k).length, join(k).length); if (l < longest) { longest = l; best = [join(0, k), join(k)]; } }
+  return best;
+}
+// A caption's visible box: its widest line (the spans carry the backdrop), whatever the side classes do to the paragraph.
+const boxWidth = (el) => Math.max(0, ...Array.from(el.children, (s) => s.getBoundingClientRect().width));
 
 function decodeText(el, text, opts) {
   stopDecode(el, { complete: false });
@@ -35,13 +48,12 @@ export function createLabels(root, instrument, shape) {
   const pt = { x: 0, y: 0 };
   const nodePoint = (cam, i) => cssPoint(cam, [shape.nodes[i * 3], shape.nodes[i * 3 + 1], shape.nodes[i * 3 + 2]], pt);
 
-  function bind(el, l) {
+  function bind(el, l, lines = Array.isArray(l.text) ? l.text : [l.text]) {
     el.__node = l.node; el.__text = Array.isArray(l.text) ? l.text.join('\n') : l.text; el.__used = true;
     bound.set(l.node, el);
     el.__fade?.stop();
     el.classList.toggle('is-finding', Boolean(l.finding));
     el.replaceChildren();
-    const lines = Array.isArray(l.text) ? l.text : [l.text];
     const spans = lines.map((line) => { const s = document.createElement('span'); el.append(s); return [s, line]; });
     el.__fade = animate(el, { opacity: [0, 1] }, { duration: reduced() ? 0 : 0.25 });
     spans.forEach(([s, line], i) => decodeText(s, line, { duration: 0.4, alphaDuration: 0.25, fraction: 0.6, delay: i * 0.08 }));
@@ -49,18 +61,19 @@ export function createLabels(root, instrument, shape) {
   function unbind(el) {
     if (el.__node === undefined || el.__node === null) return;
     bound.delete(el.__node);
-    el.__node = null; el.__text = null; el.__sortY = undefined; el.__left = undefined;
+    el.__node = null; el.__text = null; el.__sortY = undefined; el.__left = undefined; el.__w = undefined; el.__lift = 0;
     el.__fade?.stop();
     el.__fade = animate(el, { opacity: 0 }, { duration: reduced() ? 0 : 0.06 });
   }
 
   // labels: model.state.labels; cam: model.cam with scaleX/scaleY (backing px per CSS px).
   // Layout: anchors are pushed out of the ember's halo, then stacked in one column per side of the ember
-  // (18 px pitch, 32 for the two-line finding). On phones a single reading sits centred under the cage.
+  // (18 px pitch, 32 for the two-line finding). On phones and short landscape screens a single reading sits centred above the cage.
   const items = [];
+  shortLandscape.addEventListener('change', () => pool.forEach(unbind));   // a rotation re-lays the caption from scratch
   function position(labels, cam) {
     if (!cam.ready) return;
-    const phone = cam.cssWidth < 600;
+    const phone = cam.cssWidth < 600 || shortLandscape.matches;   // caption mode: phones and short landscape screens
     if (phone && labels.length > 1) labels = labels.slice(0, 1);
     const R = cam.shellPx.r / cam.scaleY, ex = cam.emberPx[0] / cam.scaleX, ey = (cam.height - cam.emberPx[1]) / cam.scaleY;
     for (const el of pool) el.__used = false;
@@ -72,10 +85,25 @@ export function createLabels(root, instrument, shape) {
       if (!el) { el = pool.find((e) => e.__node === null || e.__node === undefined); if (!el) continue; bind(el, l); }
       el.__used = true;
       const p = nodePoint(cam, l.node);
-      items.push({ el, x: p.x, y: p.y, pitch: l.finding ? 32 : 18 });
+      items.push({ el, l, x: p.x, y: p.y, pitch: l.finding ? 32 : 18 });
     }
     if (phone) {
-      for (const it of items) { it.x = cam.shellPx.x / cam.scaleX; it.y = (cam.height - cam.shellPx.y) / cam.scaleY - R - 26; }   // a caption above the sphere, clear of the wordmark
+      // A caption above the sphere, clear of the wordmark, at least 8 px inside the screen. In short landscape the copy column
+      // begins at least 20 px right of the cage (style.css --ls-gap), so the caption also keeps left of that: a reading too wide
+      // for the room is set as two lines (measured once per binding), lifted by the added line so it still clears the cage.
+      const cx = cam.shellPx.x / cam.scaleX, top = (cam.height - cam.shellPx.y) / cam.scaleY - R;
+      const right = shortLandscape.matches ? cx + R + 20 : cam.cssWidth - 8;
+      for (const it of items) {
+        const el = it.el;
+        if (el.__w === undefined) {
+          const spans = [...el.children], room = right - 8;
+          const lines = (Array.isArray(it.l.text) ? it.l.text : [it.l.text]).flatMap((line, i) => (spans[i]?.getBoundingClientRect().width > room ? splitReading(line) : [line]));
+          if (lines.length > spans.length) { const h = el.offsetHeight; bind(el, it.l, lines); el.__lift = el.offsetHeight - h; }
+          el.__w = boxWidth(el);
+        }
+        const half = el.__w / 2;
+        it.x = Math.max(Math.ceil(8 + half), Math.min(cx, Math.floor(right - half))); it.y = top - 26 - (el.__lift || 0);
+      }
     } else {
       for (const it of items) {
         const dx = it.x - ex, dy = it.y - ey, d = Math.hypot(dx, dy) || 1, min = 0.5 * R;

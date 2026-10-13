@@ -9,12 +9,11 @@
 }
 * { box-sizing: border-box; }
 /* One still page: no scrolling, no rubber-band, no text selection or long-press callouts (form fields stay editable and the
-   contact address stays copyable). Short landscape phones keep scrolling until their own layout fits (see the media query). */
+   contact address stays copyable). Short landscape screens get their own two-column layout (end of this file). */
 html { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body { margin: 0; min-width: 320px; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--ink);
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 input, textarea, .email-address { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
-@media (orientation: landscape) and (max-height: 500px) { html, body { height: auto; overflow: auto; } .scene { touch-action: pan-y pinch-zoom !important; } }
 html[data-renderer='static'] body { background: radial-gradient(42% 42% at 50% 30%, #15171C 0%, transparent 70%), var(--ink); }
 .world { position: fixed; top: 0; left: 0; right: 0; bottom: auto; display: block; width: 100%; height: 100vh; height: 100lvh; pointer-events: none; z-index: 0; }
 html[data-renderer='static'] .world { display: none; }
@@ -249,4 +248,54 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .service { min-height: 26px; }
   .contact-trigger-shell { margin-top: 18px; }
   .verse { margin-top: 14px; }
+}
+
+/* Short landscape (a phone held sideways, a short wide window: landscape and at most 600 px tall, where the corner instrument is
+   already hidden): the cage on the left, the copy on the right, each centred in its column and the pair centred in the viewport,
+   so nothing scrolls. The cage is the hero (62 % of the height, never wider than 38 % of the width); the copy is one still column:
+   one-line wordmark, tagline, the two rows, the conversation line, the promise. Sizes breathe with the height (svh) and width (vw).
+   labels.js reads the same query (the readings take the phone's caption mode here). */
+@media (orientation: landscape) and (max-height: 600px) {
+  :root { --ls-cage: clamp(150px, min(62svh, 38vw), 300px); --ls-gap: clamp(20px, 3vw, 40px); --ls-pad: clamp(12px, 4svh, 20px); }
+  .scene { padding: var(--ls-pad) max(20px, env(safe-area-inset-right)) calc(var(--ls-pad) + 10px) max(20px, env(safe-area-inset-left)); }   /* a touch above centre: clear of a home indicator */
+  .stage { grid-template-columns: minmax(var(--ls-cage), 2fr) minmax(0, 3fr); column-gap: var(--ls-gap); align-items: center; }
+  .mark-anchor { grid-column: 1; grid-row: 1 / span 7; height: var(--ls-cage); margin: 0; }   /* spans every copy row (6 items; noscript renders none) */
+  .stage > :not(.mark-anchor) { grid-column: 2; }
+  h1 { font-size: clamp(22px, 4.3vw, 42px); }
+  .name-break { display: none; }
+  .work-type { margin-top: clamp(8px, 2.6svh, 14px); font-size: 13px; }
+  .services { margin-top: clamp(8px, 2.8svh, 14px); font-size: clamp(11px, .9vw + 5px, 13px); }
+  .services-secondary { margin-top: clamp(4px, 1.5svh, 8px); }
+  .service { min-height: clamp(22px, 6svh, 26px); }
+  .contact-trigger-shell { margin-top: clamp(10px, 3.6svh, 20px); }
+  .contact-trigger { height: clamp(36px, 10svh, 44px); }
+  .verse { margin-top: clamp(8px, 2.6svh, 16px); font-size: 11px; }
+  .motion-toggle { right: auto; left: max(16px, env(safe-area-inset-left)); }   /* under the cage; the copy column keeps its corner */
+  /* the panels: shallower frames, so more of the form and the verse are in view before they scroll */
+  .dialog-content { padding: 22px 28px 20px; }
+  h2 { font-size: 24px; margin: 8px 0 8px; }
+  .contact-heading { margin-bottom: 16px; }
+  .verse-surface .dialog-content { padding: 28px 28px 24px; }
+  .verse-quote p { font-size: 21px; }
+  .verse-cite { margin-top: 14px; }
+}
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 699px) { .work-tail { display: block; } }   /* a narrow copy column: the tagline as two lines */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 500px) { .services-secondary, .services-secondary li { gap: 4px; } }   /* 480 wide: row 2's one short line (252 px) overhangs its 238 px column by 7 px a side, not 12 (the <= 360 phone gap) */
+@media (orientation: landscape) and (max-height: 600px) and (min-width: 601px) {
+  .services { column-gap: clamp(10px, 1vw + 3px, 14px); }
+  .services li { gap: clamp(10px, 1vw + 3px, 14px); }
+}
+/* 641 up: full words on wrapped lines at every width (above 1200 px too); 641-1023: row 1 as 3 + 2 + 2 (the phone breaks), row 2 as
+   3 + 3. Same specificity as the phone rules they mirror: they work because they come later, so keep these two blocks together, last. */
+@media (orientation: landscape) and (max-height: 600px) and (min-width: 641px) {
+  .services { flex-wrap: wrap; row-gap: 0; }
+  .services li.services-break { display: block; flex-basis: 100%; height: 0; min-height: 0; }
+  .services li.services-break-phone { display: none; }   /* the phone breaks carry both classes: off here, row 1 below turns them on */
+  .services .line-end .service-separator { display: none; }
+}
+@media (orientation: landscape) and (max-height: 600px) and (min-width: 641px) and (max-width: 1023px) {
+  .services-primary li.services-break { display: none; }
+  .services-primary li.services-break-phone { display: block; flex-basis: 100%; height: 0; min-height: 0; }
+  .services-primary .line-end .service-separator { display: inline-block; }
+  .services-primary .line-end-phone .service-separator { display: none; }
 }
