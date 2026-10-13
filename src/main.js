@@ -444,7 +444,7 @@ function focusContact() {
 }
 
 // The verse: words take the light in reading order, arriving warm and cooling to their resting colour (CSS owns
-// it: silver, or the promise's blue for "a future and a hope", which therefore stays lit), then the citation.
+// it: silver, or the promise's blue for "hope and a future", which therefore stays lit), then the citation.
 // Scene still => no decorative text light; the structural panel transition still plays.
 const verseBody = $('#verse-body');
 const verseWords = wrapWords(verseBody.querySelector('p'));
