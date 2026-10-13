@@ -175,6 +175,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 @media (max-width: 1200px) {
   .services { flex-wrap: wrap; row-gap: 0; }
   .services li.services-break { display: block; flex-basis: 100%; height: 0; min-height: 0; }
+  .services li.services-break-phone { display: none; }   /* row 1's phone breaks (below) */
   .services .line-end .service-separator { display: none; }
   .services-secondary { margin-top: 12px; }
 }
@@ -186,10 +187,14 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .verse { margin-top: 20px; }
   .service { min-height: 26px; }   /* four lines of rows still fit a 600 px tall window */
 }
-/* phones: the short forms; row 1 keeps its 4 + 3, row 2 returns to one line */
+/* phones: the short forms, but Surveillance keeps its word, so row 1 runs 3 + 2 + 2; row 2 returns to one line */
 @media (max-width: 640px) {
   .service-full { display: none; }
   .service-short { display: inline; }
+  .services-primary li.services-break { display: none; }
+  .services-primary li.services-break-phone { display: block; }
+  .services-primary .line-end .service-separator { display: inline-block; }
+  .services-primary .line-end-phone .service-separator { display: none; }
   .services-secondary { flex-wrap: nowrap; margin-top: 10px; }
   .services-secondary li.services-break { display: none; }
   .services-secondary .line-end .service-separator { display: inline-block; }
