@@ -332,13 +332,17 @@ export function createModel(shape, uniforms) {
     s.tapNodes.forEach((i) => { hold[i] = until; });
     return [p[0], p[1], p[2]];
   }
-  // Row-1 hover: the class node nearest the word's rim point links and prints the word's own reading.
+  // Row-1 hover: the class node nearest the word's rim point links and prints the word's own reading. On wrapped and
+  // phone layouts a word sits elsewhere and its nearest member can be far round the cage: then the class's own anchor
+  // (shape.js, on the lower front rim under the word's desktop position) takes it.
   function rowHover(classIndex, lon = 0, reading = null) {
     if (s.forcedNode >= 0 && hold[s.forcedNode] === Infinity) hold[s.forcedNode] = 0;
     if (classIndex < 0) { s.forcedNode = -1; s.forcedText = null; return; }
-    const rim = [Math.sin(lon), -1.2, Math.cos(lon)], l = Math.hypot(...rim);
-    const [node] = nearestClassed(shape, rim.map((x) => x / l), 1, classIndex);
-    s.forcedNode = node ?? -1;
+    const rim = [Math.sin(lon), -1.2, Math.cos(lon)], l = Math.hypot(...rim), p = rim.map((x) => x / l);
+    const [node] = nearestClassed(shape, p, 1, classIndex);
+    const q = node >= 0 ? nodeAt(shape, node) : null;
+    const near = q && Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.6;   // a member under the word, or the class's own anchor
+    s.forcedNode = near ? node : (shape.anchors?.[classIndex] ?? node ?? -1);
     if (s.forcedNode >= 0) { hold[s.forcedNode] = Infinity; if (reading) s.forcedText = reading; }
   }
 
