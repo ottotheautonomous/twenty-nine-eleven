@@ -8,7 +8,13 @@
   --visitor-x: 50%; --visitor-y: 45%; --name-w: 100%; --name-h: 100%;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--ink); }
+/* One still page: no scrolling, no rubber-band, no text selection or long-press callouts (form fields stay editable and the
+   contact address stays copyable). Short landscape phones keep scrolling until their own layout fits (see the media query). */
+html { height: 100%; overflow: hidden; overscroll-behavior: none; }
+body { margin: 0; min-width: 320px; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--ink);
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+input, textarea, .email-address { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+@media (orientation: landscape) and (max-height: 500px) { html, body { height: auto; overflow: auto; } .scene { touch-action: pan-y pinch-zoom !important; } }
 html[data-renderer='static'] body { background: radial-gradient(42% 42% at 50% 30%, #15171C 0%, transparent 70%), var(--ink); }
 .world { position: fixed; top: 0; left: 0; right: 0; bottom: auto; display: block; width: 100%; height: 100vh; height: 100lvh; pointer-events: none; z-index: 0; }
 html[data-renderer='static'] .world { display: none; }
@@ -25,7 +31,7 @@ button:focus-visible { outline: 1px solid var(--dawn); outline-offset: 4px; }
 .js:not(.entered) :is([data-enter], .name-word, .services li, .world, .motion-toggle, .instrument) { opacity: 0; animation: tne-reveal .6s 2.5s forwards; }
 @keyframes tne-reveal { to { opacity: 1; } }
 
-.scene { position: relative; z-index: 1; touch-action: pan-y pinch-zoom; min-height: 100svh; display: grid; place-items: center; padding: max(28px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom)); }
+.scene { position: relative; z-index: 1; touch-action: pinch-zoom; min-height: 100svh; display: grid; place-items: center; padding: max(28px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom)); }
 .stage { display: grid; justify-items: center; width: 100%; max-width: 1000px; text-align: center; }   /* the seven-word row is 942 px */
 
 /* The DOM anchor the lattice is projected onto: a sphere's bounding box. */
