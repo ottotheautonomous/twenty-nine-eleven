@@ -6,7 +6,8 @@
 --   * intake.*                    private schema, never listed under Data API "Exposed schemas"; RLS ENABLED and FORCED with no
 --                                 policies; no grant for PUBLIC, anon, authenticated or service_role, now or by default later.
 --   * public.submit_enquiry()     the only write path: SECURITY DEFINER, search_path = '', re-validates every field, stores once
---                                 per request_id, returns void. EXECUTE only for service_role (the role an sb_secret_ key maps to).
+--                                 per request_id, at most 300 new enquiries per rolling 24 hours, returns void. EXECUTE only for
+--                                 service_role (the role an sb_secret_ key maps to).
 --   * public.contact_keepalive()  a harmless heartbeat on a one-row table, same grant rule.
 --   Nothing in the API can read, change or delete a stored enquiry. The owner reads rows in the Dashboard (role postgres).
 
@@ -85,6 +86,11 @@ revoke all on all tables    in schema intake from public, anon, authenticated, s
 --    already validated it: this is defence in depth, and never stricter than the Worker, so a Worker-valid enquiry is never
 --    refused here); a constant error that never echoes the input; returns void (PostgREST answers 204 with no body).
 --    ON CONFLICT DO NOTHING: a retried request_id is a no-op, and nothing reachable from the API can read or change a stored row.
+--    Daily cap: the Worker's rate limits count per Cloudflare location and are eventually consistent, and a leaked key skips
+--    them, so the database itself refuses new enquiries once 300 arrived in the last 24 hours. The largest enquiry the Worker
+--    accepts takes about 18 kB with indexes, so the cap bounds growth to about 5 MB a day against the Free plan's 500 MB
+--    (read-only beyond it). Refused with SQLSTATE PT429 (PostgREST answers HTTP 429; the Worker answers 503 with Retry-After
+--    and the visitor's draft stays in the form). Approximate under concurrency: calls in flight together can add a few more.
 create function public.submit_enquiry(
   p_request_id uuid,
   p_name       text,
@@ -96,6 +102,8 @@ language plpgsql
 security definer
 set search_path = ''
 as $fn$
+declare
+  daily_cap constant integer := 300;   -- new enquiries per rolling 24 hours (live_checks.sql check 14 reads this line)
 begin
   if p_request_id is null or p_name is null or p_email is null or p_message is null
      -- name: 1-120 characters; no C0/C1 controls or DEL; no quote, angle brackets or backslash; no line/paragraph separators;
@@ -115,13 +123,23 @@ begin
     raise exception 'enquiry rejected' using errcode = 'check_violation';   -- 23514 -> HTTP 400 at PostgREST; the Worker answers 503
   end if;
 
+  -- A retry of an enquiry that is already stored stays a silent no-op, even if the cap has been reached since.
+  if exists (select 1 from intake.contact_submissions where request_id = p_request_id) then
+    return;
+  end if;
+
+  -- Uses the created_at index. Deleting junk rows reopens the form at once.
+  if (select count(*) from intake.contact_submissions where created_at > pg_catalog.now() - interval '24 hours') >= daily_cap then
+    raise exception 'enquiry limit reached' using errcode = 'PT429';   -- HTTP 429 at PostgREST; the Worker answers 503
+  end if;
+
   insert into intake.contact_submissions (request_id, name, email, message, source)
   values (p_request_id, p_name, p_email, p_message, p_source)
   on conflict (request_id) do nothing;
 end
 $fn$;
 comment on function public.submit_enquiry(uuid, text, text, text, text) is
-  'Store one contact enquiry (write-once per request_id). Callable only by service_role, i.e. the contact Worker''s secret key.';
+  'Store one contact enquiry (write-once per request_id; at most 300 new ones per rolling 24 hours). Callable only by service_role, i.e. the contact Worker''s secret key.';
 
 -- Postgres grants EXECUTE on a new function to PUBLIC. Remove it, then allow only the Worker's role.
 revoke all on function public.submit_enquiry(uuid, text, text, text, text) from public, anon, authenticated;

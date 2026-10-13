@@ -2,9 +2,9 @@
 # Offline proof of supabase/migrations/20261013120000_contact_intake.sql on a throwaway local PostgreSQL 16 with Supabase-like
 # roles (postgres NOSUPERUSER + BYPASSRLS; anon, authenticated, service_role, authenticator). No Supabase, no network, no
 # Docker: the cluster lives in a temp dir on 127.0.0.1 and is removed afterwards. Applies the migration twice, under the 2026
-# no-grant defaults and under the old permissive defaults, runs live_checks.sql (all PASS) and offline_checks.sql, proves that
-# live_checks.sql reports FAIL after a deliberate sabotage, proves the guard, and compares the whole output with
-# offline-expected.txt. Exit 0 = identical.
+# no-grant defaults and under the old permissive defaults, runs live_checks.sql (all PASS) and offline_checks.sql (including
+# the daily cap), proves that live_checks.sql reports FAIL after a deliberate sabotage, proves the guard, and compares the
+# whole output with offline-expected.txt. Exit 0 = identical.
 # Usage: bash supabase/verify/offline-pg16.sh            (PG_BIN=/usr/lib/postgresql/16/bin by default)
 #        UPDATE_EXPECTED=1 bash supabase/verify/offline-pg16.sh   (rewrite the expected output after a reviewed change)
 set -euo pipefail
@@ -29,11 +29,11 @@ run() {
     if [ "$mode" = old-defaults ]; then q -U postgres -d t -v ON_ERROR_STOP=1 -f "$here/fixtures/02_old_defaults.sql"; fi
     echo "--- migration as postgres (NOSUPERUSER, BYPASSRLS): expect no errors"
     q -U postgres -d t -v ON_ERROR_STOP=1 -f "$migration" 2>&1
-    echo "--- live_checks.sql right after the migration (n|result): expect PASS for 1-13, INFO for 14-16"
+    echo "--- live_checks.sql right after the migration (n|result): expect PASS for 1-14, INFO for 15-17"
     q -U postgres -d t -v ON_ERROR_STOP=1 -A -t -F '|' -f "$here/live_checks.sql" 2>&1 | cut -d'|' -f1,2
     q -U postgres -d t -f "$here/offline_checks.sql" 2>&1
     if [ "$mode" = new-defaults ]; then
-      echo "--- negative control: live_checks.sql after fixtures/03_sabotage.sql (expect FAIL for 2-13)"
+      echo "--- negative control: live_checks.sql after fixtures/03_sabotage.sql (expect FAIL for 2-14)"
       q -U postgres -d t -v ON_ERROR_STOP=1 -f "$here/fixtures/03_sabotage.sql" 2>&1
       q -U postgres -d t -v ON_ERROR_STOP=1 -A -t -F '|' -f "$here/live_checks.sql" 2>&1 | cut -d'|' -f1,2
     fi

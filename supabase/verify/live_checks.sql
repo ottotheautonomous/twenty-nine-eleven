@@ -1,5 +1,5 @@
 -- Read-only checks for the LIVE project after the migration: one query, one row per check, result PASS / FAIL / INFO.
--- Nothing here writes or shows enquiry contents (block 14 shows counts only).
+-- Nothing here writes or shows enquiry contents (check 17 shows counts only).
 -- Run: Dashboard -> SQL Editor (runs as postgres) -> paste -> Run;
 --  or, only on the optional CLI path with a short-lived scoped token (runbook appendix A): npx supabase@2.120.0 db query --linked -f supabase/verify/live_checks.sql
 -- Acceptance: no FAIL row. The INFO rows are read by a person (docs/CONTACT-SUPABASE.md section 7).
@@ -110,19 +110,30 @@ checks(n, check_name, expected, actual, result) as (
     coalesce((select string_agg(pubname || ':' || tablename, ', ') from pg_publication_tables where schemaname = 'intake'), 'none'),
     case when exists (select 1 from pg_publication_tables where schemaname = 'intake') then 'FAIL' else 'PASS' end
   union all
-  select 14, 'exposed schemas recorded on the authenticator role (the Dashboard setting is authoritative)', 'public, graphql_public; never intake',
+  select 14, 'submit_enquiry refuses new enquiries beyond its daily cap (SQLSTATE PT429)', 'daily_cap between 1 and 1000 (300 as shipped), PT429',
+    coalesce((select 'daily_cap=' || coalesce(substring(p.prosrc from 'daily_cap\s+constant\s+integer\s*:=\s*(\d+)'), 'none')
+                     || case when p.prosrc ~ '''PT429''' then ', PT429' else ', no PT429' end
+              from pg_proc p where p.oid = 'public.submit_enquiry(uuid,text,text,text,text)'::regprocedure), 'no function'),
+    case when (select p.prosrc ~ '''PT429''' and p.prosrc ~ '>=\s*daily_cap'
+                      and substring(p.prosrc from 'daily_cap\s+constant\s+integer\s*:=\s*(\d+)')::int between 1 and 1000
+               from pg_proc p where p.oid = 'public.submit_enquiry(uuid,text,text,text,text)'::regprocedure)
+         then 'PASS' else 'FAIL' end
+  union all
+  select 15, 'exposed schemas recorded on the authenticator role (the Dashboard setting is authoritative)', 'public, graphql_public; never intake',
     coalesce((select string_agg(s, '; ') from pg_db_role_setting rs, unnest(rs.setconfig) s
               where rs.setrole = 'authenticator'::regrole and s like 'pgrst.db_schemas=%'), 'not recorded on the role: read the Dashboard setting'),
     case when exists (select 1 from pg_db_role_setting rs, unnest(rs.setconfig) s
                       where rs.setrole = 'authenticator'::regrole and s like 'pgrst.db_schemas=%' and s ~ '(=|,)\s*"?intake"?\s*(,|$)')
          then 'FAIL' else 'INFO' end
   union all
-  select 15, 'for the record: roles that bypass RLS or are superusers', 'postgres, service_role and platform-internal roles',
+  select 16, 'for the record: roles that bypass RLS or are superusers', 'postgres, service_role and platform-internal roles',
     (select string_agg(rolname || case when rolsuper then ' (superuser)' else '' end, ', ' order by rolname) from pg_roles where rolsuper or rolbypassrls),
     'INFO'
   union all
-  select 16, 'counts only, no contents', 'enquiries = 1 after the smoke test; last_beat moves after each cron run',
-    'enquiries=' || (select count(*) from intake.contact_submissions) || ', last_beat=' || coalesce((select beat_at::text from intake.keepalive), 'none'),
+  select 17, 'counts only, no contents', 'enquiries = 1 after the smoke test; last_beat moves after each cron run',
+    'enquiries=' || (select count(*) from intake.contact_submissions)
+      || ', last_24h=' || (select count(*) from intake.contact_submissions where created_at > now() - interval '24 hours')
+      || ', last_beat=' || coalesce((select beat_at::text from intake.keepalive), 'none'),
     'INFO'
 )
 select n, result, check_name, expected, actual from checks order by n;

@@ -8,7 +8,7 @@ computer or local file: those details live in the lead's untracked notes and the
 ## What this builds
 
 The page's contact form already posts to the Cloudflare Worker at `https://contact.twentynineeleven.net/api/contact`. The
-Worker keeps every protection it had (origin allow-list incl. `www`, per-IP and shared rate limits, optional Turnstile,
+Worker keeps every protection it had (origin allow-list incl. `www`, per-IP and shared rate limits, Turnstile (section 8),
 validation, honeypot, body caps, fail-closed 503s) and, instead of sending an email, makes **one** call to one database
 function in the owner's own Free Supabase project. Nothing about DNS or mail changes.
 
@@ -16,7 +16,7 @@ function in the owner's own Free Supabase project. Nothing about DNS or mail cha
 |---|---|
 | `intake.contact_submissions` | The enquiries: `id`, `request_id`, `created_at`, `name`, `email`, `message`, `source` (the page's host, e.g. `www.twentynineeleven.net`). No IP address, no user agent, no other header. |
 | `intake` schema | Private: never listed under the Data API's exposed schemas. RLS enabled **and forced** on every table, no policies, no grant to `PUBLIC`, `anon`, `authenticated` or `service_role`, now or by default later. |
-| `public.submit_enquiry(...)` | The only write path. SECURITY DEFINER, `search_path = ''`, re-validates every field, stores once per `request_id`, returns nothing. Only `service_role` (the Worker's `sb_secret_` key) may call it. |
+| `public.submit_enquiry(...)` | The only write path. SECURITY DEFINER, `search_path = ''`, re-validates every field, stores once per `request_id`, refuses new enquiries once 300 arrived in the last 24 hours, returns nothing. Only `service_role` (the Worker's `sb_secret_` key) may call it. |
 | `public.contact_keepalive()` | Stamps one non-personal row three times a day (Worker Cron Trigger) so the Free project is not paused. Same grant rule. |
 | Worker secrets | `SUPABASE_URL` and `SUPABASE_SECRET_KEY`, held only by Cloudflare. Never in the page, the repository, a file, a log or chat. |
 
@@ -100,10 +100,10 @@ extra is a row in Supabase's migration history. If that is wanted anyway, use ap
 
 ### 4c. Database checks straight after
 
-1. Paste `supabase/verify/live_checks.sql` into the SQL Editor and Run. One row per check. **Acceptance: rows 1-13 PASS, no
-   FAIL.** Read the INFO rows: 14 (exposed schemas as recorded on the role; otherwise confirm the Dashboard setting from
-   section 3; the live proof is the probe in section 7 step 2), 15 (roles that bypass RLS: `postgres`, `service_role` and
-   Supabase's internal roles), 16 (`enquiries=0`).
+1. Paste `supabase/verify/live_checks.sql` into the SQL Editor and Run. One row per check. **Acceptance: rows 1-14 PASS, no
+   FAIL** (row 14 is the daily cap: `daily_cap=300, PT429`). Read the INFO rows: 15 (exposed schemas as recorded on the role;
+   otherwise confirm the Dashboard setting from section 3; the live proof is the probe in section 7 step 2), 16 (roles that
+   bypass RLS: `postgres`, `service_role` and Supabase's internal roles), 17 (`enquiries=0, last_24h=0`).
 2. **Security Advisor**: Dashboard → Advisors → Security Advisor → Rerun. **Acceptance: 0 ERROR, 0 WARN.** Expected and
    accepted by design: two INFO `rls_enabled_no_policy` findings, one per `intake` table (RLS with no policy is exactly
    "nobody but the owner"). The same linter reports exactly that on the offline stand-in. The Dashboard's Security Advisor
@@ -149,7 +149,8 @@ npx wrangler logout                               # revokes the session: none st
 
 ## 7. LIVE verification (lead; all of it, in order)
 
-Record the date and the outcome of each step in `VALIDATION.md`. The form is not operational until steps 1-5 pass.
+Record the date and the outcome of each step in `VALIDATION.md`. The form is not operational until steps 1-5 pass **and
+Turnstile is on (section 8, required)**.
 
 1. **Database checks**: re-run `supabase/verify/live_checks.sql` (section 4c). No FAIL.
 2. **No key, publishable key, and a made-up secret key all fail**:
@@ -170,7 +171,7 @@ Record the date and the outcome of each step in `VALIDATION.md`. The form is not
    `select id, created_at, name, email, char_length(message) as chars, source from intake.contact_submissions order by id desc limit 3;`
    Expect one row with `source = www.twentynineeleven.net`, and the name and message exactly as typed.
 4. **Still nothing readable through the API with a row present**: run step 2 again (identical result) and
-   `live_checks.sql` (row 16 now says `enquiries=1`).
+   `live_checks.sql` (row 17 now says `enquiries=1, last_24h=1`).
 5. **Advisors**: Security Advisor shows 0 ERROR and 0 WARN (section 4c, including any recorded owner acceptance).
 6. **Keep-alive**: after the next 03:17, 11:17 or 19:17 UTC, `select beat_at from intake.keepalive;` has moved, and the
    Worker's Cron Triggers page in the Cloudflare dashboard shows a successful run.
@@ -182,18 +183,31 @@ Record the date and the outcome of each step in `VALIDATION.md`. The form is not
 8. Optional: delete the test row in the SQL Editor (`delete from intake.contact_submissions where id = <n>;`; only the owner
    can). Then add a dated line to `VALIDATION.md`: "live enquiry storage verified".
 
-## 8. Turnstile (unchanged)
+## 8. Turnstile: required before the form is called operational
 
-As in `DEPLOY.md` section 3: create the widget, `npx wrangler secret put TURNSTILE_SECRET`, set the repository variable
-`TURNSTILE_SITE_KEY`, republish the page. Set the secret only after the page with the site key is live. Re-run section 7 step 2.
+Without Turnstile, a script can send valid-looking enquiries, and the Worker's rate limits do not stop a determined one:
+Cloudflare's rate-limit binding is "local to the Cloudflare location" and "permissive, eventually consistent", and a few
+addresses (or one IPv6 /62) can keep the shared 20-a-minute cap busy all day. The database's own cap (300 new enquiries per
+24 hours, section 9) keeps such a flood from filling the Free plan's 500 MB, but junk can still use up the cap and lock real
+visitors out until it is deleted or ages out. Turnstile makes every enquiry carry a fresh, single-use proof from a real browser.
+
+1. As in `DEPLOY.md` section 3: create the widget (hostnames: `www.twentynineeleven.net`, `twentynineeleven.net`, plus any
+   GitHub Pages host still in use; they must match `TURNSTILE_HOSTNAMES` in `wrangler.jsonc`), set the repository variable
+   `TURNSTILE_SITE_KEY`, and republish the page.
+2. Only once the page with the site key is live: `npx wrangler secret put TURNSTILE_SECRET` (the owner pastes the secret at
+   the hidden prompt). Before that, real visitors would be refused.
+3. `npx wrangler secret list` shows `SUPABASE_SECRET_KEY`, `SUPABASE_URL` and `TURNSTILE_SECRET`. Re-run section 7 step 2,
+   then send one more authorized enquiry from the live page (it must reach the thank-you state) and confirm its row as in
+   section 7 step 3. Record "Turnstile on" with the date in `VALIDATION.md`.
 
 ## 9. Rotating the secret key, and what to do if it leaks
 
-What a leaked `sb_secret_` key allows: calling `submit_enquiry` without the Worker's rate limits, i.e. inserting junk rows (each
-under about 6 kB; Free's 500 MB would take roughly 80,000 of them before the database turns read-only), stamping the keep-alive,
-and Supabase's admin APIs for Auth (no users, sign-ups off) and Storage (no buckets). It does **not** allow reading, changing or
-deleting any enquiry: `service_role` has no privilege on `intake`, the function returns nothing, the schema is not exposed, and
-RLS is forced. It gives no direct database access (that needs the database password).
+What a leaked `sb_secret_` key allows: calling `submit_enquiry` without the Worker's rate limits, i.e. inserting junk rows (up
+to about 18 kB each with indexes, measured on PostgreSQL 16; at most 300 new rows per rolling 24 hours, about 5 MB a day,
+because the function refuses more), stamping the keep-alive, and Supabase's admin APIs for Auth (no users, sign-ups off) and
+Storage (no buckets). It does **not** allow reading, changing or deleting any enquiry: `service_role` has no privilege on
+`intake`, the function returns nothing, the schema is not exposed, and RLS is forced. It gives no direct database access (that
+needs the database password).
 
 Routine rotation (no downtime):
 
@@ -207,6 +221,17 @@ Suspected leak: delete the old key **first** (enquiries fail with the page's "co
 draft stays in the form), then steps 1-3. Afterwards look for junk rows (`select id, created_at, source from
 intake.contact_submissions order by id desc limit 50;`) and delete them. If the database password may also have leaked: Project
 Settings → Database → reset the password, into the password manager.
+
+**The daily cap, and the public form.** Without the cap, about 29,500 maximal rows would fill Free's 500 MB, after which the
+project "enters read-only mode" and every enquiry fails. That needs no leaked key: before Turnstile, a script sending
+valid-looking enquiries through the public form could add roughly 28,800 a day per Cloudflare location. The cap bounds both
+routes to about 5 MB a day (a measured flood of 1,000 maximal enquiries stored 300, about 5 MB, and refused 700). Its cost: junk
+can use the cap up, and then visitors see the page's "could not be sent. Please try again shortly" message (the draft stays in
+the form) until older rows leave the 24-hour window. To reopen the form at once, delete the junk (`select count(*) from
+intake.contact_submissions where created_at > now() - interval '24 hours';` shows how many count). The number is the `daily_cap`
+line in `public.submit_enquiry`; changing it is a reviewed migration (owner decision, section 12). If the database ever does
+turn read-only, Supabase's way back, in the SQL Editor: `set session characteristics as transaction read write;`, delete the
+junk, `vacuum;`, then `set default_transaction_read_only = 'off';`.
 
 Related exposures to keep closed: anyone who can deploy this Worker (the Cloudflare account, or GitHub write access plus the
 repository's Cloudflare token) could change what it does with **future** enquiries. They still cannot read stored ones. Keep
@@ -242,7 +267,7 @@ Worker logs nothing else: no contents, no key, no database body.
 | status 540, or status 0 with DNS errors | the Free project is paused | Dashboard → Resume; check the keep-alive (section 7 step 6) |
 | status 0 | timeout or network error (one retry already happened) | Supabase status page; try again |
 | status 400 | the function refused a field the Worker accepted (should not happen) | report it with the time; no contents are logged |
-| status 429 | Supabase rate-limited the call; the page shows "please try again" | wait |
+| status 429 | the daily cap was reached (300 new enquiries in 24 hours), or Supabase rate-limited the call; the page shows "please try again" | count the last 24 hours (section 9); if junk, delete it and the form accepts again at once; otherwise wait |
 
 ## 12. Owner decisions still open
 
@@ -253,6 +278,7 @@ Worker logs nothing else: no contents, no key, no database body.
 5. Optional: one line in the contact dialog such as "Your details are stored privately so we can reply; nothing else is
    recorded." (not required: the page makes no storage claim), and an optional content-free new-enquiry ping.
 6. Accepting an Auth-configuration Security Advisor WARN that the Free plan cannot fix, if one appears (section 4c).
+7. The daily cap: 300 new enquiries per rolling 24 hours (shipped), or another number (section 9).
 
 ## Appendix A. Optional: the Supabase CLI with a short-lived, project-scoped token
 
@@ -334,6 +360,11 @@ and while that token exists it can run SQL on the database, which means reading 
   a schema not in db-schemas): https://docs.postgrest.org/en/latest/references/api/functions.html · https://docs.postgrest.org/en/latest/references/errors.html
 - Cloudflare, Secrets (`secrets.required`; `wrangler secret put` deploys a new version): https://developers.cloudflare.com/workers/configuration/secrets/
 - Cloudflare, Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
+- Cloudflare, Rate Limiting binding ("local to the Cloudflare location"; "permissive, eventually consistent"):
+  https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+- Supabase, Database size (Free projects "enter read-only mode when your database size exceeds 500 MB"; the SQL to leave
+  it): https://supabase.com/docs/guides/platform/database-size
+- PostgREST, raising `PTxyz` sets the HTTP status (`PT429` → 429): https://docs.postgrest.org/en/latest/references/errors.html
 - Wrangler 4.149.0 source, read offline: the first-deploy refusal with required secrets, and the placeholder Worker that
   `secret put` offers to create.
 - Design notes: the lead's review notes (not in the repository). Offline proof: `supabase/verify/offline-pg16.sh`.

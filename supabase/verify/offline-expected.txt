@@ -1,6 +1,6 @@
 ################ new-defaults ################
 --- migration as postgres (NOSUPERUSER, BYPASSRLS): expect no errors
---- live_checks.sql right after the migration (n|result): expect PASS for 1-13, INFO for 14-16
+--- live_checks.sql right after the migration (n|result): expect PASS for 1-14, INFO for 15-17
 1|PASS
 2|PASS
 3|PASS
@@ -14,9 +14,10 @@
 11|PASS
 12|PASS
 13|PASS
-14|INFO
+14|PASS
 15|INFO
 16|INFO
+17|INFO
 === A. service_role: the Worker path ===
 --- A1 submit twice with one request_id (expect ok, ok; one row later, the first version kept)
  submit_enquiry 
@@ -59,7 +60,7 @@
 
 --- A3 invalid inputs rejected with one constant message and no echo of the input (expect 11 x "enquiry rejected")
 psql:offline_checks.sql:23: ERROR:  enquiry rejected
-CONTEXT:  PL/pgSQL function public.submit_enquiry(uuid,text,text,text,text) line 18 at RAISE
+CONTEXT:  PL/pgSQL function public.submit_enquiry(uuid,text,text,text,text) line 20 at RAISE
 psql:offline_checks.sql:25: ERROR:  enquiry rejected
 psql:offline_checks.sql:26: ERROR:  enquiry rejected
 psql:offline_checks.sql:27: ERROR:  enquiry rejected
@@ -98,13 +99,13 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
  id |              request_id              |                   name                   |           email            | message_chars |           source            | stamped 
 ----+--------------------------------------+------------------------------------------+----------------------------+---------------+-----------------------------+---------
   1 | 21f5d5dc-0896-4c55-9b85-fd756e532ea2 | Jane Example                             | jane@example.com           |            38 | www.twentynineeleven.net    | t
-  3 | 31f5d5dc-0896-4c55-9b85-fd756e532ea2 | Sam 👨‍👩‍👧                               | li@example.xn--fiqs8s      |             5 | ottotheautonomous.github.io | t
-  4 | 32f5d5dc-0896-4c55-9b85-fd756e532ea2 | 😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀 | ivan@xn--e1afmkfd.xn--p1ai |          5000 |                             | t
-  5 | 33f5d5dc-0896-4c55-9b85-fd756e532ea2 | Siobhán O'Brien-Ng                       | a+tag@mail.example.co.uk   |            24 |                             | t
-  6 | 34f5d5dc-0896-4c55-9b85-fd756e532ea2 | علی‌رضا                                   | x@example.com              |            10 |                             | t
-  7 | 35f5d5dc-0896-4c55-9b85-fd756e532ea2 | Smith, John                              | john@example.com           |            25 | twentynineeleven.net        | t
-  8 | 36f5d5dc-0896-4c55-9b85-fd756e532ea2 | xxxxxxxxxxxxxxxxxxxx                     | y@example.com              |          5000 | michaeljameshofer.github.io | t
-  9 | 37f5d5dc-0896-4c55-9b85-fd756e532ea2 | ශ්‍රී                                       | z@example.com              |            32 |                             | t
+  2 | 31f5d5dc-0896-4c55-9b85-fd756e532ea2 | Sam 👨‍👩‍👧                               | li@example.xn--fiqs8s      |             5 | ottotheautonomous.github.io | t
+  3 | 32f5d5dc-0896-4c55-9b85-fd756e532ea2 | 😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀 | ivan@xn--e1afmkfd.xn--p1ai |          5000 |                             | t
+  4 | 33f5d5dc-0896-4c55-9b85-fd756e532ea2 | Siobhán O'Brien-Ng                       | a+tag@mail.example.co.uk   |            24 |                             | t
+  5 | 34f5d5dc-0896-4c55-9b85-fd756e532ea2 | علی‌رضا                                   | x@example.com              |            10 |                             | t
+  6 | 35f5d5dc-0896-4c55-9b85-fd756e532ea2 | Smith, John                              | john@example.com           |            25 | twentynineeleven.net        | t
+  7 | 36f5d5dc-0896-4c55-9b85-fd756e532ea2 | xxxxxxxxxxxxxxxxxxxx                     | y@example.com              |          5000 | michaeljameshofer.github.io | t
+  8 | 37f5d5dc-0896-4c55-9b85-fd756e532ea2 | ශ්‍රී                                       | z@example.com              |            32 |                             | t
 
  beat_recent 
 -------------
@@ -151,7 +152,35 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
 ---------------------+-----------------------+------------------------+---------------------------+-----------------+-----------------------
  f                   | f                     | f                      | f                         | f               | f
 
---- negative control: live_checks.sql after fixtures/03_sabotage.sql (expect FAIL for 2-13)
+=== F. daily cap: at most 300 new enquiries per rolling 24 hours, refused with SQLSTATE PT429 (HTTP 429 at PostgREST) ===
+--- F1 owner (postgres): the 8 stored rows move to 25 hours ago, outside the window; 299 filler rows from 23 hours ago
+--- F2 the 300th enquiry within 24 hours is stored (expect ok)
+ submit_enquiry 
+----------------
+ 
+
+--- F3 the 301st is refused: SQLSTATE PT429, then the same call showing its constant message "enquiry limit reached"
+psql:offline_checks.sql:120: ERROR:  PT429
+psql:offline_checks.sql:122: ERROR:  enquiry limit reached
+--- F4 a retry of the stored 300th enquiry is still a silent no-op at the cap (expect ok)
+ submit_enquiry 
+----------------
+ 
+
+--- F5 invalid input at the cap is still refused as "enquiry rejected" (validation comes first)
+psql:offline_checks.sql:126: ERROR:  enquiry rejected
+--- F6 owner deletes one junk row, and the next enquiry is stored at once (expect ok, then PT429 for the one after)
+ submit_enquiry 
+----------------
+ 
+
+psql:offline_checks.sql:133: ERROR:  PT429
+--- F7 owner view, counts only (expect last_24h 300, total 308, refused_stored 0)
+ last_24h | total | refused_stored 
+----------+-------+----------------
+      300 |   308 |              0
+
+--- negative control: live_checks.sql after fixtures/03_sabotage.sql (expect FAIL for 2-14)
 1|PASS
 2|FAIL
 3|FAIL
@@ -165,12 +194,13 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
 11|FAIL
 12|FAIL
 13|FAIL
-14|INFO
+14|FAIL
 15|INFO
 16|INFO
+17|INFO
 ################ old-defaults ################
 --- migration as postgres (NOSUPERUSER, BYPASSRLS): expect no errors
---- live_checks.sql right after the migration (n|result): expect PASS for 1-13, INFO for 14-16
+--- live_checks.sql right after the migration (n|result): expect PASS for 1-14, INFO for 15-17
 1|PASS
 2|PASS
 3|PASS
@@ -184,9 +214,10 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
 11|PASS
 12|PASS
 13|PASS
-14|INFO
+14|PASS
 15|INFO
 16|INFO
+17|INFO
 === A. service_role: the Worker path ===
 --- A1 submit twice with one request_id (expect ok, ok; one row later, the first version kept)
  submit_enquiry 
@@ -229,7 +260,7 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
 
 --- A3 invalid inputs rejected with one constant message and no echo of the input (expect 11 x "enquiry rejected")
 psql:offline_checks.sql:23: ERROR:  enquiry rejected
-CONTEXT:  PL/pgSQL function public.submit_enquiry(uuid,text,text,text,text) line 18 at RAISE
+CONTEXT:  PL/pgSQL function public.submit_enquiry(uuid,text,text,text,text) line 20 at RAISE
 psql:offline_checks.sql:25: ERROR:  enquiry rejected
 psql:offline_checks.sql:26: ERROR:  enquiry rejected
 psql:offline_checks.sql:27: ERROR:  enquiry rejected
@@ -268,13 +299,13 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
  id |              request_id              |                   name                   |           email            | message_chars |           source            | stamped 
 ----+--------------------------------------+------------------------------------------+----------------------------+---------------+-----------------------------+---------
   1 | 21f5d5dc-0896-4c55-9b85-fd756e532ea2 | Jane Example                             | jane@example.com           |            38 | www.twentynineeleven.net    | t
-  3 | 31f5d5dc-0896-4c55-9b85-fd756e532ea2 | Sam 👨‍👩‍👧                               | li@example.xn--fiqs8s      |             5 | ottotheautonomous.github.io | t
-  4 | 32f5d5dc-0896-4c55-9b85-fd756e532ea2 | 😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀 | ivan@xn--e1afmkfd.xn--p1ai |          5000 |                             | t
-  5 | 33f5d5dc-0896-4c55-9b85-fd756e532ea2 | Siobhán O'Brien-Ng                       | a+tag@mail.example.co.uk   |            24 |                             | t
-  6 | 34f5d5dc-0896-4c55-9b85-fd756e532ea2 | علی‌رضا                                   | x@example.com              |            10 |                             | t
-  7 | 35f5d5dc-0896-4c55-9b85-fd756e532ea2 | Smith, John                              | john@example.com           |            25 | twentynineeleven.net        | t
-  8 | 36f5d5dc-0896-4c55-9b85-fd756e532ea2 | xxxxxxxxxxxxxxxxxxxx                     | y@example.com              |          5000 | michaeljameshofer.github.io | t
-  9 | 37f5d5dc-0896-4c55-9b85-fd756e532ea2 | ශ්‍රී                                       | z@example.com              |            32 |                             | t
+  2 | 31f5d5dc-0896-4c55-9b85-fd756e532ea2 | Sam 👨‍👩‍👧                               | li@example.xn--fiqs8s      |             5 | ottotheautonomous.github.io | t
+  3 | 32f5d5dc-0896-4c55-9b85-fd756e532ea2 | 😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀 | ivan@xn--e1afmkfd.xn--p1ai |          5000 |                             | t
+  4 | 33f5d5dc-0896-4c55-9b85-fd756e532ea2 | Siobhán O'Brien-Ng                       | a+tag@mail.example.co.uk   |            24 |                             | t
+  5 | 34f5d5dc-0896-4c55-9b85-fd756e532ea2 | علی‌رضا                                   | x@example.com              |            10 |                             | t
+  6 | 35f5d5dc-0896-4c55-9b85-fd756e532ea2 | Smith, John                              | john@example.com           |            25 | twentynineeleven.net        | t
+  7 | 36f5d5dc-0896-4c55-9b85-fd756e532ea2 | xxxxxxxxxxxxxxxxxxxx                     | y@example.com              |          5000 | michaeljameshofer.github.io | t
+  8 | 37f5d5dc-0896-4c55-9b85-fd756e532ea2 | ශ්‍රී                                       | z@example.com              |            32 |                             | t
 
  beat_recent 
 -------------
@@ -321,9 +352,37 @@ psql:offline_checks.sql:62: ERROR:  permission denied for schema intake at chara
 ---------------------+-----------------------+------------------------+---------------------------+-----------------+-----------------------
  f                   | f                     | f                      | f                         | f               | f
 
+=== F. daily cap: at most 300 new enquiries per rolling 24 hours, refused with SQLSTATE PT429 (HTTP 429 at PostgREST) ===
+--- F1 owner (postgres): the 8 stored rows move to 25 hours ago, outside the window; 299 filler rows from 23 hours ago
+--- F2 the 300th enquiry within 24 hours is stored (expect ok)
+ submit_enquiry 
+----------------
+ 
+
+--- F3 the 301st is refused: SQLSTATE PT429, then the same call showing its constant message "enquiry limit reached"
+psql:offline_checks.sql:120: ERROR:  PT429
+psql:offline_checks.sql:122: ERROR:  enquiry limit reached
+--- F4 a retry of the stored 300th enquiry is still a silent no-op at the cap (expect ok)
+ submit_enquiry 
+----------------
+ 
+
+--- F5 invalid input at the cap is still refused as "enquiry rejected" (validation comes first)
+psql:offline_checks.sql:126: ERROR:  enquiry rejected
+--- F6 owner deletes one junk row, and the next enquiry is stored at once (expect ok, then PT429 for the one after)
+ submit_enquiry 
+----------------
+ 
+
+psql:offline_checks.sql:133: ERROR:  PT429
+--- F7 owner view, counts only (expect last_24h 300, total 308, refused_stored 0)
+ last_24h | total | refused_stored 
+----------+-------+----------------
+      300 |   308 |              0
+
 ################ guard: migration as owner_nobypass (expect one ERROR from the guard, and no intake schema) ################
-psql:20261013120000_contact_intake.sql:28: ERROR:  contact_intake: run this migration as postgres with BYPASSRLS (current role: owner_nobypass). The intake tables are FORCE RLS with no policies, so any other owner could never store or read an enquiry.
+psql:20261013120000_contact_intake.sql:29: ERROR:  contact_intake: run this migration as postgres with BYPASSRLS (current role: owner_nobypass). The intake tables are FORCE RLS with no policies, so any other owner could never store or read an enquiry.
 intake schemas: 0
 ################ guard: migration as cli_login_stub (expect one ERROR from the guard, and no intake schema) ################
-psql:20261013120000_contact_intake.sql:28: ERROR:  contact_intake: run this migration as postgres with BYPASSRLS (current role: cli_login_stub). The intake tables are FORCE RLS with no policies, so any other owner could never store or read an enquiry.
+psql:20261013120000_contact_intake.sql:29: ERROR:  contact_intake: run this migration as postgres with BYPASSRLS (current role: cli_login_stub). The intake tables are FORCE RLS with no policies, so any other owner could never store or read an enquiry.
 intake schemas: 0

@@ -106,3 +106,34 @@ select has_function_privilege('anon', 'public.later_fn()', 'execute')           
        has_table_privilege('service_role', 'intake.later_tbl', 'select')                as service_select_intake_tbl,
        has_sequence_privilege('anon', 'intake.later_tbl_x_seq', 'usage')                as anon_intake_seq,
        has_function_privilege('authenticator', 'intake.later_fn()', 'execute')          as public_exec_intake_fn;
+
+\echo '=== F. daily cap: at most 300 new enquiries per rolling 24 hours, refused with SQLSTATE PT429 (HTTP 429 at PostgREST) ==='
+\echo '--- F1 owner (postgres): the 8 stored rows move to 25 hours ago, outside the window; 299 filler rows from 23 hours ago'
+update intake.contact_submissions set created_at = now() - interval '25 hours';
+insert into intake.contact_submissions (request_id, name, email, message, created_at)
+select gen_random_uuid(), 'Filler', 'filler@example.com', 'filler row', now() - interval '23 hours' from generate_series(1, 299);
+set role service_role;
+\echo '--- F2 the 300th enquiry within 24 hours is stored (expect ok)'
+select public.submit_enquiry('51f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Cap Three Hundred', 'cap@example.com', 'the 300th enquiry today', null);
+\echo '--- F3 the 301st is refused: SQLSTATE PT429, then the same call showing its constant message "enquiry limit reached"'
+\set VERBOSITY sqlstate
+select public.submit_enquiry('52f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Cap Over', 'over@example.com', 'one enquiry too many', null);
+\set VERBOSITY terse
+select public.submit_enquiry('52f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Cap Over', 'over@example.com', 'one enquiry too many', null);
+\echo '--- F4 a retry of the stored 300th enquiry is still a silent no-op at the cap (expect ok)'
+select public.submit_enquiry('51f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Cap Three Hundred', 'cap@example.com', 'the 300th enquiry today', null);
+\echo '--- F5 invalid input at the cap is still refused as "enquiry rejected" (validation comes first)'
+select public.submit_enquiry('53f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Eve', 'a,b@evil.example', 'long enough message', null);
+reset role;
+\echo '--- F6 owner deletes one junk row, and the next enquiry is stored at once (expect ok, then PT429 for the one after)'
+delete from intake.contact_submissions where id = (select min(id) from intake.contact_submissions where name = 'Filler');
+set role service_role;
+select public.submit_enquiry('52f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Cap Over', 'over@example.com', 'one enquiry too many', null);
+\set VERBOSITY sqlstate
+select public.submit_enquiry('54f5d5dc-0896-4c55-9b85-fd756e532ea2', 'Cap Again', 'again@example.com', 'refused at the cap again', null);
+\set VERBOSITY terse
+reset role;
+\echo '--- F7 owner view, counts only (expect last_24h 300, total 308, refused_stored 0)'
+select count(*) filter (where created_at > now() - interval '24 hours') as last_24h, count(*) as total,
+       count(*) filter (where request_id = '54f5d5dc-0896-4c55-9b85-fd756e532ea2') as refused_stored
+from intake.contact_submissions;
