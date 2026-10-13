@@ -49,7 +49,7 @@ export function createLabels(root, instrument, shape) {
   function unbind(el) {
     if (el.__node === undefined || el.__node === null) return;
     bound.delete(el.__node);
-    el.__node = null; el.__text = null; el.__sortY = undefined;
+    el.__node = null; el.__text = null; el.__sortY = undefined; el.__left = undefined;
     el.__fade?.stop();
     el.__fade = animate(el, { opacity: 0 }, { duration: reduced() ? 0 : 0.06 });
   }
@@ -83,13 +83,16 @@ export function createLabels(root, instrument, shape) {
       }
       // Stable order: a label keeps its slot unless its anchor moves more than 6 px (the cage drifts every frame).
       for (const it of items) { if (it.el.__sortY === undefined || Math.abs(it.y - it.el.__sortY) > 6) it.el.__sortY = it.y; }
-      for (const side of [items.filter((i) => i.x < ex), items.filter((i) => i.x >= ex)]) {
+      // Stable side: a label keeps its side of the ember until its anchor is 0.15 R past it (a pin near the centre line would otherwise change sides as the cage leans toward the pointer).
+      const zone = 0.15 * R;
+      for (const it of items) { it.el.__left = it.x < ex - zone ? true : it.x > ex + zone ? false : (it.el.__left ?? it.x < ex); }
+      for (const side of [items.filter((i) => i.el.__left), items.filter((i) => !i.el.__left)]) {
         side.sort((a, b) => a.el.__sortY - b.el.__sortY);
         for (let i = 1; i < side.length; i++) side[i].y = Math.max(side[i].y, side[i - 1].y + side[i - 1].pitch);
       }
     }
     for (const it of items) {
-      const flip = !phone && (it.x < ex ? it.x > 170 : it.x > cam.cssWidth - 160);
+      const flip = !phone && (it.el.__left ? it.x > 170 : it.x > cam.cssWidth - 160);
       it.el.classList.toggle('is-centred', phone);
       it.el.classList.toggle('is-left', flip);
       const ox = phone ? 0 : flip ? -14 : 14;
