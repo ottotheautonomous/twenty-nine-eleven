@@ -13,7 +13,10 @@ The owner signs in; the lead runs the commands with the owner present (runbook s
   reset the password (runbook section 1).
 - Turn on MFA for the Supabase account; keep the organization to the owner.
 - Create a dedicated Free project. Data API exposed schemas stay `public, graphql_public` (never `intake`); Auth sign-ups off;
-  Enforce SSL on; network restrictions if offered.
+  Enforce SSL on. Network restrictions: an empty list lets every address connect, so add the two documentation entries
+  `192.0.2.1/32` and `2001:db8::1/128` (or a "restrict all" control if offered), confirm they show as applied, then check that
+  `select 1;` still runs in the SQL Editor (runbook section 3 step 4; if it does not, or the section is not offered, revert
+  and record why).
 - Run `supabase/migrations/20261013120000_contact_intake.sql` once in the SQL Editor, then `supabase/verify/live_checks.sql`:
   no FAIL row. The Security Advisor must show no ERROR or WARN. No Supabase CLI is needed; if it is used anyway, follow
   runbook appendix A (a one-day, project-only token, deleted afterwards; never `supabase login`).

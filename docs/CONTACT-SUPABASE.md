@@ -80,10 +80,19 @@ If a project for this already exists, use it and only check the settings below.
    functions automatically, leave it **off** (the default for projects created since 2026-05-30).
 3. **Authentication** (unused here): Sign In / Providers → turn off **Allow new users to sign up** and the Email provider.
    Leave every other provider off. Anonymous sign-ins off.
-4. **Database settings**: **Enforce SSL on incoming connections: on.** **Network restrictions**, if the section is offered on
-   this plan: allow no address (or, only while appendix A's optional CLI path is in use, the lead's current IP, removed right
-   after). These restrictions
-   cover direct Postgres and pooler connections only, not the HTTPS Data API, which keys and grants protect.
+4. **Database settings** (https://supabase.com/dashboard/project/_/database/settings): **Enforce SSL on incoming connections:
+   on.** Then **Network Restrictions**. An empty allow-list is the default and means "All IPs can connect" (Supabase), so
+   leaving it empty restricts nothing. Use a "restrict all" control if the Dashboard offers one; otherwise add exactly two
+   entries, the reserved documentation addresses that no real computer uses: `192.0.2.1/32` (IPv4) and `2001:db8::1/128` (IPv6;
+   Supabase says to add "both IPv4 and IPv6 CIDRs"). Save, and confirm the panel shows the restrictions as **applied** with
+   those two entries, not the default empty list. These restrictions cover direct Postgres and pooler connections only, not
+   the HTTPS Data API, which keys and grants protect.
+   - Straight after, run `select 1;` in the SQL Editor (the owner's only way to read the enquiries). It must return one row.
+     If it fails, remove the two entries again so the SQL Editor works, and record "network restrictions break the SQL
+     Editor, left unrestricted" with the date in `VALIDATION.md`.
+   - If the section is not offered on this plan, record "network restrictions not offered on Free" in `VALIDATION.md`.
+   - Appendix A's optional CLI path replaces the two entries with the lead's current public address (`/32` for IPv4, `/128`
+     for IPv6) only while it runs, and puts them back afterwards.
 5. Leave **pg_graphql** disabled (Database → Extensions; off by default on new projects).
 6. Note the **project ref** (the 20 characters in the Dashboard URL) and the project URL `https://<ref>.supabase.co`.
 
@@ -186,7 +195,8 @@ Turnstile is on (section 8, required)**.
 6. **Keep-alive**: after the next 03:17, 11:17 or 19:17 UTC, `select beat_at from intake.keepalive;` has moved, and the
    Worker's Cron Triggers page in the Cloudflare dashboard shows a successful run.
 7. **Account hygiene**, ticked by the owner: Supabase MFA on; organization = owner only; Enforce SSL on; network restrictions
-   set (or recorded as not offered on Free); the database password only in the password manager, no plain-text copy left, and
+   applied (the two documentation entries shown as applied, not the default empty list) and the SQL Editor still answers
+   `select 1;` (or the reason they are off recorded in `VALIDATION.md`, section 3 step 4); the database password only in the password manager, no plain-text copy left, and
    reset after any plain-text exposure (section 1); legacy JWT keys disabled; Auth sign-ups off; exposed schemas =
    `public, graphql_public`; Cloudflare account MFA on; Wrangler logged out on this computer; **Supabase Account → Access Tokens
    (https://supabase.com/dashboard/account/tokens) lists no token created for this setup** (no `cli_…` token from a
@@ -304,7 +314,9 @@ and while that token exists it can run SQL on the database, which means reading 
 
 1. The owner creates a token at https://supabase.com/dashboard/account/tokens: **this project only**; Database
    **read-write** (needed by `db push`) and nothing else; expiry: the shortest preset (one day). Supabase shows the value
-   once. It goes straight into the hidden prompt below: never a file, the password manager or chat.
+   once. It goes straight into the hidden prompt below: never a file, the password manager or chat. If network restrictions
+   are applied (section 3 step 4), the owner temporarily replaces the two documentation entries with the lead's current
+   public address (`/32` for IPv4, `/128` for IPv6); step 4 puts them back.
 2. In one shell, with the token only in that shell's environment (the CLI reads `SUPABASE_ACCESS_TOKEN`; nothing is written
    to disk):
 
@@ -338,8 +350,9 @@ and while that token exists it can run SQL on the database, which means reading 
 
    Then the owner **deletes the token** at https://supabase.com/dashboard/account/tokens (the one-day expiry is a backstop,
    not the cleanup). If anyone ran `supabase login` after all, delete its `cli_<user>@<host>_<time>` token on the same page
-   too, then run `npx supabase@2.120.0 logout` to remove the local copy. Remove any network-restriction exception added for
-   this (section 3 step 4). Section 7 step 7 checks the result.
+   too, then run `npx supabase@2.120.0 logout` to remove the local copy. In Network Restrictions, replace the lead's address
+   with the two documentation entries again (`192.0.2.1/32`, `2001:db8::1/128`; section 3 step 4) and confirm they show as
+   applied. Section 7 step 7 checks the result.
 
 ## Sources
 
@@ -355,7 +368,11 @@ and while that token exists it can run SQL on the database, which means reading 
 - Supabase, Free project pausing ("low activity over a 7-day period"; "a few user requests to the database each day";
   warning "roughly one week before"): https://supabase.com/docs/guides/platform/free-project-pausing
 - Supabase, HTTP status codes (540: project paused): https://supabase.com/docs/guides/troubleshooting/http-status-codes
-- Supabase, Network restrictions ("They don't apply to HTTPS APIs such as PostgREST, Storage, and Auth"): https://supabase.com/docs/guides/platform/network-restrictions
+- Supabase, Network restrictions ("They don't apply to HTTPS APIs such as PostgREST, Storage, and Auth"; with no
+  restrictions ever applied, the allowed list is empty and "All IPs can connect"; add "both IPv4 and IPv6 CIDRs"; read
+  2026-10-13): https://supabase.com/docs/guides/platform/network-restrictions
+- Reserved documentation addresses used as the "allow nobody" entries: IPv4 192.0.2.0/24 (https://www.rfc-editor.org/rfc/rfc5737)
+  and IPv6 2001:db8::/32 (https://www.rfc-editor.org/rfc/rfc3849).
 - Supabase, SSL enforcement: https://supabase.com/docs/guides/platform/ssl-enforcement
 - Supabase changelog, scoped personal access tokens (2026-10-06: tokens limited to selected projects, per-capability
   read or read-write, chosen expiry; "The browser flow for `supabase login` still creates an account-level token"):
