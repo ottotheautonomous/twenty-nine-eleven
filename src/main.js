@@ -408,6 +408,28 @@ function highlightContact(active) {
 hover(trigger, () => { highlightContact(true); return () => highlightContact(false); });
 trigger.addEventListener('focus', () => highlightContact(true));
 trigger.addEventListener('blur', () => highlightContact(false));
+// Form messages arrive and leave as light, never as a jump: each field's error slot is reserved (CSS), a new message
+// fades and sharpens in, a cleared or replaced one fades out in place over its slot. The form code writes the text;
+// these observers only animate it.
+function softenMessages(element) {
+  let shown = element.textContent;
+  new MutationObserver(() => {
+    const text = element.textContent;
+    if (text === shown) return;
+    const previous = shown; shown = text;
+    if (previous && !still()) {   // the leaving message, as a ghost over the same slot
+      const ghost = document.createElement(element.tagName === 'P' ? 'p' : 'span');   // a fresh node (no copied attributes)
+      ghost.className = `${element.className} error-ghost`; ghost.setAttribute('aria-hidden', 'true'); ghost.textContent = previous;
+      ghost.style.left = `${element.offsetLeft}px`; ghost.style.top = `${element.offsetTop}px`; ghost.style.width = `${element.offsetWidth}px`;
+      element.after(ghost);
+      animate(ghost, { opacity: [1, 0], filter: ['blur(0px)', 'blur(2px)'] }, { duration: .4, ease: [0.4, 0, 1, 1] }).then(() => ghost.remove());
+    }
+    if (!text) return;
+    if (still()) { setImmediateMotion(element, { opacity: 1, filter: 'blur(0px)' }); return; }
+    animate(element, { opacity: [0, 1], filter: ['blur(3px)', 'blur(0px)'] }, { duration: .5, delay: previous ? .12 : 0, ease: [0.22, 1, 0.36, 1] });
+  }).observe(element, { childList: true, characterData: true, subtree: true });
+}
+document.querySelectorAll('.field-error, #form-status').forEach(softenMessages);
 // Tactile press without moving text: the arrows answer, the labels stay put.
 const pressSpring = { type: 'spring', stiffness: 400, damping: 30 };
 press(trigger, () => {

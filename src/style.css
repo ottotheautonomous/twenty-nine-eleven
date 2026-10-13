@@ -116,7 +116,7 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .veil { position: fixed; inset: 0; z-index: 2; background: #020607; opacity: 0; pointer-events: none; }
 .contact-dialog { width: min(480px, calc(100vw - 32px)); max-width: none; max-height: min(740px, calc(100svh - 32px)); border: 0; padding: 0; background: transparent; color: var(--silver); overflow: visible; }
 .contact-dialog::backdrop { background: transparent; }
-.dialog-surface { position: relative; max-height: min(740px, calc(100svh - 32px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #2c3b3a transparent; border: 1px solid #ffffff12; border-radius: 10px;
+.dialog-surface { position: relative; max-height: min(740px, calc(100svh - 32px)); overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: #2c3b3a transparent; border: 1px solid #ffffff12; border-radius: 10px;
   background: radial-gradient(ellipse at var(--visitor-x) var(--visitor-y), #ffdfa80a 0, transparent 60%), linear-gradient(#0d1517f7, #090f11f7);
   box-shadow: 0 30px 90px #000a, inset 0 1px 0 #ffffff0a; }
 .dialog-surface::before { content: ''; position: absolute; top: 0; left: 25%; right: 25%; height: 1px; background: linear-gradient(90deg, transparent, #ffdfa899, transparent); }
@@ -128,15 +128,16 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 h2 { font-size: 32px; line-height: 1.12; font-weight: 400; letter-spacing: -.03em; margin: 18px 0 15px; }
 .email-address { font: 400 11px/1.6 'IBM Plex Mono', monospace; color: var(--muted); margin: 0; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-.field { margin-bottom: 19px; }
+.field { position: relative; margin-bottom: 0; }   /* the error slot below each field is reserved, so a message never pushes the next field */
 .field label { display: block; color: #b3c2bd; font: 400 11px/1.5 'IBM Plex Mono', monospace; letter-spacing: .025em; }
-.field input, .field textarea { display: block; width: 100%; border: 0; border-bottom: 1px solid #2c3b3a; border-radius: 0; background: transparent; color: var(--silver); font-size: 15px; line-height: 1.6; padding: 9px 0; box-shadow: none; outline: none; caret-color: var(--dawn); }
+.field input, .field textarea { display: block; width: 100%; border: 0; border-bottom: 1px solid #2c3b3a; border-radius: 0; background: transparent; color: var(--silver); font-size: 15px; line-height: 1.6; padding: 9px 0; box-shadow: none; outline: none; caret-color: var(--dawn); transition: border-color .45s cubic-bezier(.22, 1, .36, 1), box-shadow .45s cubic-bezier(.22, 1, .36, 1); }
+@media (prefers-reduced-motion: reduce) { .field input, .field textarea { transition: none; } .dialog-surface { scroll-behavior: auto; } }
 .field textarea { resize: vertical; min-height: 89px; max-height: 200px; }
 .field input:focus, .field textarea:focus { border-bottom-color: var(--dawn); box-shadow: 0 7px 18px -14px #ffdfa8; }
 .field:focus-within label { color: var(--dawn); }
 .field [aria-invalid='true'] { border-color: var(--error); }
-.field-error { display: block; font-size: 12px; line-height: 1.5; color: var(--error); margin-top: 5px; }
-.field-error:empty { display: none; }
+.field-error { display: block; min-height: 18px; font-size: 12px; line-height: 1.5; color: var(--error); margin: 5px 0 14px; padding: 0; }   /* always present: messages fade in and out in place */
+.error-ghost { position: absolute; margin: 0; pointer-events: none; }   /* the leaving message, faded out over its slot */
 .honeypot { display: none; }
 .turnstile:empty { display: none; }
 .turnstile { margin-top: 14px; }   /* Cloudflare's widget, shown only if it needs an interaction */
