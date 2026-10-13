@@ -19,7 +19,7 @@ computer or local file: those details live in the lead's untracked notes and the
 
 ## What this builds
 
-The page's contact form already posts to the Cloudflare Worker at `https://contact.twentynineeleven.net/api/contact`. The
+The page's contact form posts to the Cloudflare Worker at `https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact` (as deployed; see the as-deployed record). The
 Worker keeps every protection it had (origin allow-list incl. `www`, per-IP and shared rate limits, Turnstile (set up in section 6),
 validation, honeypot, body caps, fail-closed 503s) and, instead of sending an email, makes **one** call to one database
 function in the owner's own Free Supabase project. Nothing about DNS or mail changes.
@@ -191,7 +191,7 @@ npx wrangler logout                               # revokes the session: none st
   creates a placeholder Worker that only holds the secrets, and the real deploy then inherits all three.
 - After pasting each key: if a clipboard manager is running, delete the entry, then copy something harmless.
 - `SUPABASE_URL` is not a credential, but the repository is public, so the project ref stays out of it.
-- The deploy creates the custom domain `contact.twentynineeleven.net` (as before) and one Cron Trigger (`17 3,11,19 * * *`
+- The deploy publishes the Worker on its `workers.dev` address (ottotheautonomous account; no custom domain) and one Cron Trigger (`17 3,11,19 * * *`
   UTC). Cron changes can take up to 15 minutes to take effect.
 - Later redeploys, always from `main` after the merge: `npm run contact:deploy`, or **Actions → Deploy contact service to
   Cloudflare** once `CLOUDFLARE_API_TOKEN` (scoped to this account's Workers and this zone) and `CLOUDFLARE_ACCOUNT_ID` are

@@ -30,8 +30,8 @@ npm run build
 ## Hosting
 
 - The GitHub Pages workflow builds and publishes `dist/` on pushes to `main`.
-- The Cloudflare Worker lives in `worker/index.mjs`; its root `wrangler.jsonc` fixes the endpoint to `contact.twentynineeleven.net/api/contact`. Enquiries are stored in the owner's Supabase project (`supabase/migrations/`); its URL and key exist only as Cloudflare Worker secrets.
-- Set the GitHub repository variable `CONTACT_ENDPOINT` if you choose a different contact hostname, then rerun the Pages workflow.
+- The Cloudflare Worker lives in `worker/index.mjs`; it answers at `https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact` (ottotheautonomous Cloudflare account, `wrangler.jsonc`). Enquiries are stored in the owner's Supabase project (`supabase/migrations/`); its URL and key exist only as Cloudflare Worker secrets.
+- The GitHub repository variables `CONTACT_ENDPOINT` and `TURNSTILE_SITE_KEY` feed the Pages build; after changing either, rerun the Pages workflow.
 - No custom domain is attached to Pages yet. Domain DNS remains a separate setup step.
 
 ## Share with Michael

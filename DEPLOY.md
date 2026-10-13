@@ -44,10 +44,8 @@ npm run check && npm run contact:check && npm run contact:deploy
 npx wrangler logout
 ```
 
-The deployment creates only the Worker, the `contact.twentynineeleven.net` custom hostname and one Cron Trigger that keeps the
-Free database from pausing. It does not change the website's apex or `www` records. If `contact` already has a DNS record,
-inspect its use before changing it; choose a free hostname and update `wrangler.jsonc` plus the GitHub `CONTACT_ENDPOINT`
-variable instead.
+The deployment creates only the Worker on its `workers.dev` address (ottotheautonomous account) and one Cron Trigger that keeps
+the Free database from pausing. It changes no DNS record. The page reaches it through the GitHub `CONTACT_ENDPOINT` variable.
 
 For later deployment from GitHub (only once `main` contains this branch), store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository **Secrets** and run
 **Actions → Deploy contact service to Cloudflare → Run workflow**; the Worker's secrets carry over to each new version. Use a
@@ -61,7 +59,7 @@ The form is built for [Turnstile](https://developers.cloudflare.com/turnstile/),
 1. In Cloudflare, open **Turnstile → Add widget**. Name it `twenty nine eleven contact`, add exactly the hostnames listed in `TURNSTILE_HOSTNAMES` in `wrangler.jsonc` (the Worker checks the token's hostname against that list), and choose **Managed** (Invisible would need Cloudflare's Turnstile privacy addendum cited in a privacy policy, which the site does not have). The **secret key** goes only to the hidden prompt of `npx wrangler secret put TURNSTILE_SECRET` in step 2's session; never commit or store it.
 2. Give the page the **site key** (public): in the GitHub repository, **Settings → Secrets and variables → Actions → Variables**, add `TURNSTILE_SITE_KEY`. The Pages build passes it as `VITE_TURNSTILE_SITE_KEY`, and the page's Content-Security-Policy then allows `challenges.cloudflare.com` for its script and frame only. The merge in step 2 republishes the page with it.
 
-The site key goes live before the secret is set: the Worker ignores the token while `TURNSTILE_SECRET` is unset, so a page with the site key is always safe, while a secret without that page would refuse every visitor. Turnstile is required because, without it, junk sent by a script could use up the database's cap (300 new enquiries in 24 hours, which stops a flood from filling the Free plan's 500 MB) and lock real visitors out until it is deleted. For more protection, also add a Cloudflare rate-limiting rule on `contact.twentynineeleven.net/api/contact` and turn on Bot Fight Mode for the zone.
+The site key goes live before the secret is set: the Worker ignores the token while `TURNSTILE_SECRET` is unset, so a page with the site key is always safe, while a secret without that page would refuse every visitor. Turnstile is required because, without it, junk sent by a script could use up the database's cap (300 new enquiries in 24 hours, which stops a flood from filling the Free plan's 500 MB) and lock real visitors out until it is deleted. For more protection, also add a Cloudflare rate-limiting rule on the Worker's route (needs a custom hostname) and turn on Bot Fight Mode for the zone.
 
 The `GLOBAL_LIMITER` cap (20 enquiries a minute) counts per Cloudflare location, not worldwide, and only spends on enquiries that passed validation and the bot check. The rate-limiting rule above is the platform-level answer to a determined script, and it also protects the Workers free plan's daily request allowance.
 

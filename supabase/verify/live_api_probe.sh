@@ -15,7 +15,7 @@ set -u
 if [ -z "${PUB:-}" ]; then read -rs -p 'Publishable key (sb_publishable_..., not echoed): ' PUB; echo; fi
 [[ "$PUB" =~ ^sb_publishable_[A-Za-z0-9_-]+$ ]] || { echo "PUB must be the publishable key (sb_publishable_...), never the secret key"; exit 2; }
 B="https://$REF.supabase.co"
-W="https://contact.twentynineeleven.net/api/contact"
+W="${WORKER:-https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact}"
 WWW="https://www.twentynineeleven.net"
 UA='twentynineeleven-live-probe/1'
 BOGUS="sb_secret_$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)"
