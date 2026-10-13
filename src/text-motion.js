@@ -54,6 +54,7 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     stop(record);
     const active = record.hover || record.focus || record.touch;
     const spatial = canAnimate() && !immediateOnly;
+    const soft = record.soft;   // a soft flash: slow in, hold, slower out, the letters unwinding in reverse (exits mirror entrances)
     record.element.dataset.textActive = String(active);
     const labels = visibleLabels(record);
     const chars = labels.flatMap(label => [...label.querySelectorAll('.motion-char')]);
@@ -65,7 +66,10 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       }
       for (const label of labels) {
         const letters = [...label.querySelectorAll('.motion-char')];
-        record.controls.push(animate(letters, { color: active ? '#ffe9c4' : record.colors.get(label) }, {
+        record.controls.push(animate(letters, { color: active ? '#ffe9c4' : record.colors.get(label) }, soft ? {
+          duration: active ? soft.in : soft.out, ease: [0.37, 0, 0.63, 1],
+          delay: stagger(soft.spread / Math.max(1, chars.length - 1), { from: active ? 'first' : 'last' }),
+        } : {
           duration: active ? .24 : .2, ease: 'easeOut',
           delay: active ? stagger(Math.min(.012, .1 / Math.max(1, chars.length - 1))) : 0,
         }));
@@ -78,7 +82,8 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     if (record.line) {
       record.line.style.transformOrigin = record.origin;
       const values = { scaleX: active ? 1 : 0, opacity: active ? .9 : 0 };
-      record.controls.push(spatial ? animate(record.line, values, { duration: active ? .24 : .18, ease: [0.22, 1, 0.36, 1] }) : immediate(record.line, values));
+      const lineTiming = soft ? { duration: active ? soft.in + soft.spread : soft.out + soft.spread, ease: [0.37, 0, 0.63, 1] } : { duration: active ? .24 : .18, ease: [0.22, 1, 0.36, 1] };
+      record.controls.push(spatial ? animate(record.line, values, lineTiming) : immediate(record.line, values));
     }
     record.dots.forEach(dot => updateSeparator(dot, record.element, active, !spatial));
     record.active = active;
@@ -141,11 +146,16 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       render(record, true);
     },
     // the hover response played once (light wave, underline), e.g. as an element is revealed; nothing moves
-    flash(element, ms = 900) {
+    // soft: { in, out, spread } seconds: a slow swell and a slower release instead of the hover's quick snap
+    flash(element, ms = 900, { soft = null } = {}) {
       const record = records.get(element);
       if (!record || !canAnimate()) return;
-      clearTimeout(record.flashTimer); set(record, 'touch', true);
-      record.flashTimer = setTimeout(() => set(record, 'touch', false), ms);
+      clearTimeout(record.flashTimer); clearTimeout(record.softTimer);
+      record.soft = soft; set(record, 'touch', true);
+      record.flashTimer = setTimeout(() => {
+        set(record, 'touch', false);
+        record.softTimer = setTimeout(() => { record.soft = null; }, soft ? (soft.out + soft.spread) * 1000 : 0);   // hovers afterwards answer at their usual pace
+      }, ms);
     },
     reset() { records.forEach(record => render(record, true)); },
     refresh() { records.forEach(record => render(record, !canAnimate())); },

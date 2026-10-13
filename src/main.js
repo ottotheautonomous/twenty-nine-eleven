@@ -451,8 +451,8 @@ function revealVerse(live) {
     delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
   })));
   // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
-  modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .3, ease: 'easeOut' }));
-  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 1100); }, last + .2);
+  modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .9, ease: [0.37, 0, 0.63, 1] }));   // the citation arrives softly
+  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 } }); }, last + .35);
 }
 function concealVerse() {
   verseFlash?.(); verseFlash = null;
