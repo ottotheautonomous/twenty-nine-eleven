@@ -123,6 +123,11 @@ extra is a row in Supabase's migration history. If that is wanted anyway, use ap
 
 ## 6. Cloudflare: secrets, then deploy (lead, owner present)
 
+**Merge `contact-supabase` into `main` first, and run these commands from an up-to-date checkout of `main`.** Until `main`
+contains this branch, do not run the GitHub Actions deploy (**Actions → Deploy contact service to Cloudflare**): it deploys
+whatever `main` holds, which is still the old email Worker, and every enquiry would fail with 503. Pushing `main` also
+republishes the page through the Pages workflow; this branch does not change the page.
+
 ```sh
 npx wrangler login && npx wrangler whoami         # the owner signs in: the account that holds twentynineeleven.net
 npx wrangler secret put SUPABASE_URL              # 1st time: "There doesn't seem to be a Worker called twenty-nine-eleven-contact.
@@ -142,9 +147,9 @@ npx wrangler logout                               # revokes the session: none st
 - `SUPABASE_URL` is not a credential, but the repository is public, so the project ref stays out of it.
 - The deploy creates the custom domain `contact.twentynineeleven.net` (as before) and one Cron Trigger (`17 3,11,19 * * *`
   UTC). Cron changes can take up to 15 minutes to take effect.
-- Later redeploys: `npm run contact:deploy`, or **Actions → Deploy contact service to Cloudflare** once `CLOUDFLARE_API_TOKEN`
-  (scoped to this account's Workers and this zone) and `CLOUDFLARE_ACCOUNT_ID` are repository secrets. Secrets carry over to
-  each new version. The Supabase key never goes to GitHub.
+- Later redeploys, always from `main` after the merge: `npm run contact:deploy`, or **Actions → Deploy contact service to
+  Cloudflare** once `CLOUDFLARE_API_TOKEN` (scoped to this account's Workers and this zone) and `CLOUDFLARE_ACCOUNT_ID` are
+  repository secrets. Secrets carry over to each new version. The Supabase key never goes to GitHub.
 - If appendix A's CLI path was used, finish its cleanup (appendix A step 4) now. `supabase logout` alone revokes nothing.
 
 ## 7. LIVE verification (lead; all of it, in order)

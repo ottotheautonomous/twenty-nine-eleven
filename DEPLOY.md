@@ -20,8 +20,10 @@ The owner signs in; the lead runs the commands with the owner present (runbook s
 
 ## 2. Deploy the contact endpoint
 
-Deploy from this checkout. The secrets must exist before the first deploy (`wrangler.jsonc` requires them), and each value is
-typed at a hidden prompt, never into a file or a command line:
+Merge `contact-supabase` into `main` first and deploy from an up-to-date checkout of `main`. Until `main` contains this
+branch, do not run the GitHub Actions deploy: it would redeploy the old email Worker and every enquiry would fail with 503.
+The secrets must exist before the first deploy (`wrangler.jsonc` requires them), and each value is typed at a hidden prompt,
+never into a file or a command line:
 
 ```sh
 npm ci
@@ -37,7 +39,7 @@ Free database from pausing. It does not change the website's apex or `www` recor
 inspect its use before changing it; choose a free hostname and update `wrangler.jsonc` plus the GitHub `CONTACT_ENDPOINT`
 variable instead.
 
-For later deployment from GitHub, store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository **Secrets** and run
+For later deployment from GitHub (only once `main` contains this branch), store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository **Secrets** and run
 **Actions → Deploy contact service to Cloudflare → Run workflow**; the Worker's secrets carry over to each new version. Use a
 token scoped to the account's Workers and this zone's needed DNS/domain permissions. Tokens and the Supabase key never belong
 in page code, repository files, or chat.
