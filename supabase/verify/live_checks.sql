@@ -1,7 +1,7 @@
 -- Read-only checks for the LIVE project after the migration: one query, one row per check, result PASS / FAIL / INFO.
 -- Nothing here writes or shows enquiry contents (block 14 shows counts only).
 -- Run: Dashboard -> SQL Editor (runs as postgres) -> paste -> Run;
---  or: npx supabase@2.120.0 db query --linked -f supabase/verify/live_checks.sql
+--  or, only on the optional CLI path with a short-lived scoped token (runbook appendix A): npx supabase@2.120.0 db query --linked -f supabase/verify/live_checks.sql
 -- Acceptance: no FAIL row. The INFO rows are read by a person (docs/CONTACT-SUPABASE.md section 7).
 with
 api_roles(r) as (values ('anon'), ('authenticated'), ('service_role'), ('authenticator')),

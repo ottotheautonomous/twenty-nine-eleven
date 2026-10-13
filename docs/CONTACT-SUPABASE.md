@@ -51,7 +51,7 @@ a chat (the lead's untracked notes list any known on this computer), do this bef
 1. Restrict the file at once (`chmod 600 <file>`), copy the value into a password-manager entry named "Supabase
    twenty-nine-eleven contact: database password", and remove the file (`shred -u <file>`).
 
-The Worker never uses this password; only the optional CLI path (4b) might ask for it.
+The Worker never uses this password; only the optional CLI path (appendix A) might ask for it.
 
 ## 2. Supabase account (owner)
 
@@ -76,14 +76,15 @@ If a project for this already exists, use it and only check the settings below.
 3. **Authentication** (unused here): Sign In / Providers → turn off **Allow new users to sign up** and the Email provider.
    Leave every other provider off. Anonymous sign-ins off.
 4. **Database settings**: **Enforce SSL on incoming connections: on.** **Network restrictions**, if the section is offered on
-   this plan: allow no address, or only the lead's current IP for the hour of section 4b, then remove it. These restrictions
+   this plan: allow no address (or, only while appendix A's optional CLI path is in use, the lead's current IP, removed right
+   after). These restrictions
    cover direct Postgres and pooler connections only, not the HTTPS Data API, which keys and grants protect.
 5. Leave **pg_graphql** disabled (Database → Extensions; off by default on new projects).
 6. Note the **project ref** (the 20 characters in the Dashboard URL) and the project URL `https://<ref>.supabase.co`.
 
 ## 4. Apply the migration (lead, owner present)
 
-### 4a. Preferred: the SQL Editor (no password, no CLI)
+### 4a. The SQL Editor (the default: no password, no CLI, no access token)
 
 Dashboard → SQL Editor → New query → paste the whole of `supabase/migrations/20261013120000_contact_intake.sql` → **Run**. The
 SQL Editor runs as `postgres`, which the migration requires (its first statement refuses any other role and creates nothing).
@@ -91,31 +92,18 @@ Expect success with no rows. If the editor warns about a potentially destructive
 objects and removes privileges; confirm for this file only. Run it **once**: a second run stops at `schema "intake" already
 exists` and changes nothing.
 
-### 4b. Alternative: the CLI (records the migration in Supabase's history)
+### 4b. No CLI needed
 
-```sh
-export SUPABASE_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1
-read -r -p 'Project ref: ' REF
-npx supabase@2.120.0 login                        # opens the browser; the owner signs in
-npx supabase@2.120.0 link --project-ref "$REF"    # if it asks for the database password, the owner types it at the hidden prompt
-npx supabase@2.120.0 db push --linked --dry-run   # expect: would push 20261013120000_contact_intake.sql
-npx supabase@2.120.0 db push --linked
-```
-
-Tested offline against a Supabase-like PostgreSQL 16 with CLI 2.120.0: `db push` switches to `postgres` before applying (a
-role that cannot is refused at connect), applies the file atomically, records it in `supabase_migrations.schema_migrations`,
-and a failed run leaves no objects and no history row. No `supabase/config.toml` is needed. `link` writes `supabase/.temp/`
-(git-ignored); remove it afterwards.
+Nothing in this runbook needs the Supabase CLI: the SQL Editor (4a), the Dashboard's Security Advisor (4c) and a Dashboard
+copy of the secret key (section 6) cover every step, and none of them leaves a credential on this computer. The CLI's only
+extra is a row in Supabase's migration history. If that is wanted anyway, use appendix A, which never runs `supabase login`.
 
 ### 4c. Database checks straight after
 
-1. Paste `supabase/verify/live_checks.sql` into the SQL Editor and Run (or `npx supabase@2.120.0 db query --linked -f
-   supabase/verify/live_checks.sql`). One row per check. **Acceptance: rows 1-13 PASS, no FAIL.** Read the INFO rows: 14
+1. Paste `supabase/verify/live_checks.sql` into the SQL Editor and Run. One row per check. **Acceptance: rows 1-13 PASS, no FAIL.** Read the INFO rows: 14
    (exposed schemas as recorded on the role; otherwise confirm the Dashboard setting from section 3), 15 (roles that bypass
    RLS: `postgres`, `service_role` and Supabase's internal roles), 16 (`enquiries=0`).
-2. **Security Advisor**: Dashboard → Advisors → Security Advisor → Rerun. With the CLI linked:
-   `npx supabase@2.120.0 db advisors --linked --type security --level info --fail-on warn` (exit code 0 required).
-   **Acceptance: 0 ERROR, 0 WARN.** Expected and accepted by design: two INFO `rls_enabled_no_policy` findings, one per
+2. **Security Advisor**: Dashboard → Advisors → Security Advisor → Rerun. **Acceptance: 0 ERROR, 0 WARN.** Expected and accepted by design: two INFO `rls_enabled_no_policy` findings, one per
    `intake` table (RLS with no policy is exactly "nobody but the owner"). The same linter reports exactly that on the offline
    stand-in. The Dashboard's Security Advisor can also list Auth-configuration findings that are not about the database (for
    example leaked-password protection, which may need a paid plan). Fix any that the plan allows. If one cannot be fixed on
@@ -126,7 +114,7 @@ and a failed run leaves no objects and no history row. No `supabase/config.toml`
 
 1. Project Settings → **API Keys** → Secret keys → **Create new secret key**, name `contact_worker`. This key is for the Worker
    only. Its only home is the Cloudflare secret in section 6: not the password manager, not a file, not chat. The Dashboard
-   (or `supabase projects api-keys --reveal`) can show it again, and rotation (section 9) replaces it.
+   can show it again, and rotation (section 9) replaces it.
 2. API Keys → Legacy API keys → **disable** the legacy `anon` and `service_role` JWT keys. Supabase: legacy keys "stay valid
    until you disable them". The Worker refuses legacy keys anyway.
 3. Note the **publishable key** (`sb_publishable_...`). It is designed to be public; the lead uses it for the probe in section 7.
@@ -149,17 +137,13 @@ npx wrangler logout                               # revokes the session: none st
   cannot be set in advance ... supply them via a secrets file"). We never put the key in a file. Instead, `secret put` first
   creates a placeholder Worker that only holds the secrets, and the real deploy then inherits them.
 - After pasting the key: if a clipboard manager is running, delete the entry, then copy something harmless.
-- Without the clipboard (CLI logged in, `jq` installed), the key can go straight from Supabase to Cloudflare, never on screen.
-  First check the field names with the masked listing (`npx supabase@2.120.0 projects api-keys --project-ref "$REF" -o json`),
-  then:
-  `set -o pipefail; npx supabase@2.120.0 projects api-keys --project-ref "$REF" --reveal -o json | jq -er '.[] | select(.name == "contact_worker") | .api_key' | npx wrangler secret put SUPABASE_SECRET_KEY`
 - `SUPABASE_URL` is not a credential, but the repository is public, so the project ref stays out of it.
 - The deploy creates the custom domain `contact.twentynineeleven.net` (as before) and one Cron Trigger (`17 3,11,19 * * *`
   UTC). Cron changes can take up to 15 minutes to take effect.
 - Later redeploys: `npm run contact:deploy`, or **Actions → Deploy contact service to Cloudflare** once `CLOUDFLARE_API_TOKEN`
   (scoped to this account's Workers and this zone) and `CLOUDFLARE_ACCOUNT_ID` are repository secrets. Secrets carry over to
   each new version. The Supabase key never goes to GitHub.
-- Afterwards, if the CLI was used: `npx supabase@2.120.0 logout` and `rm -rf supabase/.temp`.
+- If appendix A's CLI path was used, finish its cleanup (appendix A step 4) now. `supabase logout` alone revokes nothing.
 
 ## 7. LIVE verification (lead; all of it, in order)
 
@@ -185,8 +169,9 @@ Record the date and the outcome of each step in `VALIDATION.md`. The form is not
    Worker's Cron Triggers page in the Cloudflare dashboard shows a successful run.
 7. **Account hygiene**, ticked by the owner: Supabase MFA on; organization = owner only; Enforce SSL on; network restrictions set
    (or recorded as not offered on Free); the database password only in the password manager, no plain-text copy left; legacy JWT
-   keys disabled; Auth sign-ups off; exposed schemas = `public, graphql_public`; Cloudflare account MFA on; Wrangler and the
-   Supabase CLI logged out on this machine.
+   keys disabled; Auth sign-ups off; exposed schemas = `public, graphql_public`; Cloudflare account MFA on; Wrangler logged out on
+   this computer; **Supabase Account → Access Tokens (https://supabase.com/dashboard/account/tokens) lists no token created for
+   this setup** (no `cli_…` token from a `supabase login`, no token from appendix A), and the checkout has no `supabase/.temp`.
 8. Optional: delete the test row in the SQL Editor (`delete from intake.contact_submissions where id = <n>;`; only the owner
    can). Then add a dated line to `VALIDATION.md`: "live enquiry storage verified".
 
@@ -262,6 +247,56 @@ Worker logs nothing else: no contents, no key, no database body.
    recorded." (not required: the page makes no storage claim), and an optional content-free new-enquiry ping.
 6. Accepting an Auth-configuration Security Advisor WARN that the Free plan cannot fix, if one appears (section 4c).
 
+## Appendix A. Optional: the Supabase CLI with a short-lived, project-scoped token
+
+Use this only if the migration must be recorded in Supabase's history. Every CLI command runs with a personal access token,
+and while that token exists it can run SQL on the database, which means reading every enquiry. So:
+
+- **Never run `supabase login`.** Supabase: its browser flow "still creates an account-level token", valid across all the
+  owner's organizations until it expires or is deleted. `supabase logout` is "Log out and delete access tokens locally": it
+  removes the local copy and revokes nothing.
+- Pause other automated tools on this computer for the whole window: any program running as the same user can read the
+  token from the shell's environment while it exists. Keep the window short.
+
+1. The owner creates a token at https://supabase.com/dashboard/account/tokens: **this project only**; Database
+   **read-write** (needed by `db push`) and nothing else; expiry: the shortest preset (one day). Supabase shows the value
+   once. It goes straight into the hidden prompt below: never a file, the password manager or chat.
+2. In one shell, with the token only in that shell's environment (the CLI reads `SUPABASE_ACCESS_TOKEN`; nothing is written
+   to disk):
+
+   ```sh
+   export SUPABASE_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1
+   read -r -p 'Project ref: ' REF
+   read -rs -p 'Supabase access token (not echoed): ' SUPABASE_ACCESS_TOKEN; echo; export SUPABASE_ACCESS_TOKEN
+   npx supabase@2.120.0 link --project-ref "$REF"    # if it asks for the database password, the owner types it at the hidden prompt
+   npx supabase@2.120.0 db push --linked --dry-run   # expect: would push 20261013120000_contact_intake.sql
+   npx supabase@2.120.0 db push --linked
+   npx supabase@2.120.0 db query --linked -f supabase/verify/live_checks.sql              # same as 4c step 1
+   npx supabase@2.120.0 db advisors --linked --type security --level info --fail-on warn  # 4c step 2; exit code 0 required
+   ```
+
+   If a command is refused for lack of permission, use its Dashboard equivalent instead of widening the token.
+   Tested offline against a Supabase-like PostgreSQL 16 with CLI 2.120.0: `db push` switches to `postgres` before applying
+   (a role that cannot is refused at connect), applies the file atomically, records it in
+   `supabase_migrations.schema_migrations`, and a failed run leaves no objects and no history row. No `supabase/config.toml`
+   is needed. `link` writes `supabase/.temp/` (git-ignored).
+3. Optional, clipboard-free transfer of the Worker key (section 6), only if the token at step 1 was also allowed to read this
+   project's API keys. That widens the token, so the Dashboard copy stays the default. Check the field names with the masked
+   listing (`npx supabase@2.120.0 projects api-keys --project-ref "$REF" -o json`), then, with `jq` installed and Wrangler
+   logged in:
+   `set -o pipefail; npx supabase@2.120.0 projects api-keys --project-ref "$REF" --reveal -o json | jq -er '.[] | select(.name == "contact_worker") | .api_key' | npx wrangler secret put SUPABASE_SECRET_KEY`
+4. Cleanup, straight after the last command:
+
+   ```sh
+   unset SUPABASE_ACCESS_TOKEN REF
+   rm -rf supabase/.temp
+   ```
+
+   Then the owner **deletes the token** at https://supabase.com/dashboard/account/tokens (the one-day expiry is a backstop,
+   not the cleanup). If anyone ran `supabase login` after all, delete its `cli_<user>@<host>_<time>` token on the same page
+   too, then run `npx supabase@2.120.0 logout` to remove the local copy. Remove any network-restriction exception added for
+   this (section 3 step 4). Section 7 step 7 checks the result.
+
 ## Sources
 
 - Supabase, API keys ("Send publishable and secret keys on the `apikey` header, not on `Authorization: Bearer`"; browser-like
@@ -278,6 +313,11 @@ Worker logs nothing else: no contents, no key, no database body.
 - Supabase, HTTP status codes (540: project paused): https://supabase.com/docs/guides/troubleshooting/http-status-codes
 - Supabase, Network restrictions ("They don't apply to HTTPS APIs such as PostgREST, Storage, and Auth"): https://supabase.com/docs/guides/platform/network-restrictions
 - Supabase, SSL enforcement: https://supabase.com/docs/guides/platform/ssl-enforcement
+- Supabase changelog, scoped personal access tokens (2026-10-06: tokens limited to selected projects, per-capability
+  read or read-write, chosen expiry; "The browser flow for `supabase login` still creates an account-level token"):
+  https://supabase.com/changelog/scoped-personal-access-tokens-ga.md
+- Supabase CLI 2.120.0, read offline: `logout` is "Log out and delete access tokens locally" (no revoke call); the CLI takes
+  a token from "the SUPABASE_ACCESS_TOKEN environment variable".
 - Supabase, Multi-factor authentication for your account: https://supabase.com/docs/guides/platform/multi-factor-authentication
 - Supabase, Backups (Free: export regularly): https://supabase.com/docs/guides/platform/backups
 - PostgreSQL, Row security policies ("Superusers and roles with the BYPASSRLS attribute always bypass the row security system";

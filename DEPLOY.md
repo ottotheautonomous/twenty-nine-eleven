@@ -13,8 +13,9 @@ The owner signs in; the lead runs the commands with the owner present (runbook s
 - Turn on MFA for the Supabase account; keep the organization to the owner.
 - Create a dedicated Free project. Data API exposed schemas stay `public, graphql_public` (never `intake`); Auth sign-ups off;
   Enforce SSL on; network restrictions if offered.
-- Run `supabase/migrations/20261013120000_contact_intake.sql` once in the SQL Editor (or `npx supabase@2.120.0 db push
-  --linked`), then `supabase/verify/live_checks.sql`: no FAIL row. The Security Advisor must show no ERROR or WARN.
+- Run `supabase/migrations/20261013120000_contact_intake.sql` once in the SQL Editor, then `supabase/verify/live_checks.sql`:
+  no FAIL row. The Security Advisor must show no ERROR or WARN. No Supabase CLI is needed; if it is used anyway, follow
+  runbook appendix A (a one-day, project-only token, deleted afterwards; never `supabase login`).
 - Create one secret key named `contact_worker` for the Worker and disable the legacy JWT keys.
 
 ## 2. Deploy the contact endpoint
