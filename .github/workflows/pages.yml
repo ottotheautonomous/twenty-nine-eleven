@@ -23,7 +23,7 @@ jobs:
       - run: npm run contact:check
       - run: npm run build
         env:
-          VITE_CONTACT_ENDPOINT: ${{ vars.CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact' }}
+          VITE_CONTACT_ENDPOINT: ${{ vars.CONTACT_ENDPOINT || 'https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact' }}
           VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY || '' }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

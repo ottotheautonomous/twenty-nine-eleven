@@ -1,25 +1,23 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "twenty-nine-eleven-contact",
+  // The ottotheautonomous Cloudflare account (the twentynineeleven.net zone's account stays read-only for automation), so the
+  // Worker answers on its workers.dev address; the page posts there (repository variable CONTACT_ENDPOINT).
+  "account_id": "7854442e459f7a78cfaf4e7047149319",
   "main": "worker/index.mjs",
   "compatibility_date": "2026-10-09",
   "send_metrics": false,
-  "workers_dev": false,
+  "workers_dev": true,
   "preview_urls": false,
-  "routes": [
-    { "pattern": "contact.twentynineeleven.net", "custom_domain": true }
-  ],
   "vars": {
     "ALLOWED_ORIGINS": "https://ottotheautonomous.github.io,https://michaeljameshofer.github.io,https://twentynineeleven.net,https://www.twentynineeleven.net",
     "TURNSTILE_HOSTNAMES": "ottotheautonomous.github.io,michaeljameshofer.github.io,twentynineeleven.net,www.twentynineeleven.net"
   },
-  "send_email": [
-    {
-      "name": "EMAIL",
-      "destination_address": "contact@twentynineeleven.net",
-      "allowed_sender_addresses": ["enquiry@twentynineeleven.net"]
-    }
-  ],
+  // Enquiries go to the owner's private Supabase project (docs/CONTACT-SUPABASE.md). Both values exist only as Cloudflare
+  // secrets (`npx wrangler secret put <NAME>`), never in this file, the page or the repository; deploy refuses without them.
+  "secrets": { "required": ["SUPABASE_URL", "SUPABASE_SECRET_KEY"] },
+  // Keep-alive for the Free project (03:17, 11:17, 19:17 UTC): stamps one non-personal row through public.contact_keepalive().
+  "triggers": { "crons": ["17 3,11,19 * * *"] },
   "ratelimits": [
     {
       "name": "RATE_LIMITER",

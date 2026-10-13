@@ -8,3 +8,5 @@ dist-*/
 .dev.vars
 qa/
 worker/.dry-run/
+supabase/.temp/
+supabase/.branches/

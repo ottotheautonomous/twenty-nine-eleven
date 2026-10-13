@@ -2,8 +2,6 @@ const MAX_BODY_BYTES = 16_384;
 const MAX_NAME_LENGTH = 120;
 const MAX_EMAIL_LENGTH = 254;
 const MAX_MESSAGE_LENGTH = 5_000;
-const RECIPIENT = 'contact@twentynineeleven.net';
-const SENDER = 'enquiry@twentynineeleven.net';
 const DEFAULT_ORIGINS = [
   'https://ottotheautonomous.github.io',
   'https://michaeljameshofer.github.io',
@@ -11,12 +9,74 @@ const DEFAULT_ORIGINS = [
   'https://www.twentynineeleven.net',
 ];
 
-// Names reach the email's Reply-To display name: no controls (C0/C1 incl. NEL), no format/bidi/zero-width characters (except the
-// joiners U+200C/U+200D that Persian, Indic and emoji names need),
-// no line/paragraph separators and no address specials, so a name can neither look like an address nor forge a line.
+// Names are stored and shown to the owner: no controls (C0/C1 incl. NEL), no format/bidi/zero-width characters (except the
+// joiners U+200C/U+200D that Persian, Indic and emoji names need), no line/paragraph separators and no address specials, so a
+// name can neither pose as an address nor hide, reorder or forge text. The database function re-checks a subset of this rule.
 const BAD_NAME = /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}"<>\\]/u;
 // A plain addr-spec only (no quoted local parts, comments, commas or multiple addresses).
 const EMAIL = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$/;
+
+// Enquiries are stored in the owner's private Supabase database through one server-only database function,
+// public.submit_enquiry (supabase/migrations/20261013120000_contact_intake.sql). The URL and the secret key exist only as
+// Cloudflare Worker secrets; the key is sent to nothing but this project's own Data API.
+const SUPABASE_URL_RE = /^https:\/\/[a-z0-9]{20}\.supabase\.co\/?$/;   // a project URL and nothing else
+const SUPABASE_KEY_RE = /^sb_secret_[\x21-\x7e]{16,}$/;               // the current secret-key format; legacy JWT keys (eyJ...) are refused
+const SUPABASE_UA = 'twentynineeleven-contact-worker/1';              // Supabase refuses secret keys sent with browser-like user agents
+const SUPABASE_ATTEMPT_MS = 4_000;                                    // per request
+const SUPABASE_BUDGET_MS = 12_000;                                    // from the start of the visitor's request: the page gives up at 15 s
+const SUPABASE_RETRY_MIN_MS = 1_500;                                  // retry only if at least this much of the budget is left
+
+function supabaseConfigured(env) {
+  return SUPABASE_URL_RE.test(env.SUPABASE_URL ?? '') && SUPABASE_KEY_RE.test(env.SUPABASE_SECRET_KEY ?? '');
+}
+
+// One POST to one database function. Only the given body is sent: no header, cookie or address from the visitor's request.
+async function rpc(env, fn, body, deadline) {
+  const res = await fetch(`${env.SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { apikey: env.SUPABASE_SECRET_KEY, 'Content-Type': 'application/json', 'User-Agent': SUPABASE_UA },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(Math.max(1, Math.min(SUPABASE_ATTEMPT_MS, deadline - Date.now()))),
+  });
+  // The body is never read or logged: a PostgREST error can quote the row it refused.
+  try { await res.body?.cancel(); } catch {}
+  return res.status;
+}
+
+// Stores one validated enquiry: 'stored' (2xx: stored now, or already stored under this request id), 'busy' (429) or 'failed'.
+// The database keeps the first enquiry per request id and ignores copies, so the one automatic retry after a timeout or a
+// 5xx can never create a duplicate. 540 means the project is paused: retrying cannot help.
+async function storeEnquiry(env, payload, source, startedAt) {
+  const deadline = startedAt + SUPABASE_BUDGET_MS;
+  const body = {
+    p_request_id: payload.requestId.toLowerCase(),
+    p_name: payload.name,
+    p_email: payload.email,
+    p_message: payload.message,
+    p_source: source,
+  };
+  for (let attempt = 1; ; attempt++) {
+    let status = 0;   // 0 = network error or timeout
+    try { status = await rpc(env, 'submit_enquiry', body, deadline); } catch {}
+    if (status >= 200 && status < 300) return 'stored';
+    console.error(`contact: supabase submit_enquiry status ${status}`);   // the status only: never a body, key or enquiry field
+    if (status === 429) return 'busy';
+    const transient = status === 0 || (status >= 500 && status !== 540);
+    if (!transient || attempt >= 2 || deadline - Date.now() < SUPABASE_RETRY_MIN_MS) return 'failed';
+    await new Promise((resolve) => setTimeout(resolve, 200 + Math.random() * 300));
+  }
+}
+
+// The host of the allow-listed page the enquiry came from (e.g. www.twentynineeleven.net), or null if it is not a plain host.
+function sourceHost(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return /^[a-z0-9.-]{1,100}$/.test(host) ? host : null;
+  } catch {
+    return null;
+  }
+}
 
 // One rate-limit bucket per IPv4 address and per IPv6 /64 (a single host can rotate through its whole /64).
 export function ipKey(ip) {
@@ -93,7 +153,7 @@ function validate(payload) {
   if ([name, email, message, trap, requestId, turnstile].some((value) => typeof value !== 'string')) {
     return null;
   }
-  // A populated hidden field is rejected without sending mail or claiming delivery.
+  // A populated hidden field is rejected without storing anything or claiming delivery.
   if (trap.trim() || turnstile.length > 2048) return null;
 
   const cleanName = name.trim();
@@ -104,6 +164,8 @@ function validate(payload) {
     !cleanEmail || cleanEmail.length > MAX_EMAIL_LENGTH || !EMAIL.test(cleanEmail) ||
     cleanMessage.length < 10 || cleanMessage.length > MAX_MESSAGE_LENGTH ||
     /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(cleanMessage) ||
+    // A lone surrogate (possible through a JSON \ud800 escape) is not text the database can store.
+    !cleanName.isWellFormed() || !cleanEmail.isWellFormed() || !cleanMessage.isWellFormed() ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
   ) {
     return null;
@@ -130,6 +192,7 @@ async function verifyTurnstile(env, token, ip) {
 
 export default {
   async fetch(request, env) {
+    const startedAt = Date.now();
     if (new URL(request.url).pathname !== '/api/contact') {
       return response(404, { error: 'Not found.' }, null);
     }
@@ -164,7 +227,7 @@ export default {
     if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) {
       return response(413, { error: 'Your message is too long.' }, origin);
     }
-    if (typeof env.EMAIL?.send !== 'function' || typeof env.RATE_LIMITER?.limit !== 'function') {
+    if (!supabaseConfigured(env) || typeof env.RATE_LIMITER?.limit !== 'function') {
       return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin);
     }
 
@@ -214,27 +277,22 @@ export default {
       }
     }
 
-    try {
-      const sent = await env.EMAIL.send({
-        to: RECIPIENT,
-        from: { email: SENDER, name: 'twenty nine eleven' },
-        replyTo: { email: payload.email, name: payload.name },
-        subject: 'A new enquiry for twenty nine eleven',
-        text: [
-          `Name: ${payload.name}`,
-          `Email: ${payload.email}`,
-          '',
-          payload.message,
-          '',
-          `Submission reference: ${payload.requestId}`,
-        ].join('\n'),
-      });
-      // A resolved send with a message ID confirms Email Service accepted the message.
-      // It does not guarantee inbox placement; no contact contents are logged or stored by this Worker.
-      if (typeof sent?.messageId !== 'string' || !sent.messageId) throw new Error('Delivery not confirmed');
-      return response(200, { ok: true }, origin);
-    } catch {
-      return response(503, { error: 'Your message could not be sent. Please try again later.' }, origin);
+    const outcome = await storeEnquiry(env, payload, sourceHost(origin), startedAt);
+    // A 2xx from Supabase means the enquiry is stored (or was already stored under this request id).
+    // The Worker never logs, returns or forwards enquiry contents; the only log line is the database call's status code.
+    if (outcome === 'stored') return response(200, { ok: true }, origin);
+    if (outcome === 'busy') {
+      return response(503, { error: 'Contact delivery is temporarily unavailable. Please try again later.' }, origin, { 'Retry-After': '60' });
     }
+    return response(503, { error: 'Your message could not be sent. Please try again later.' }, origin);
+  },
+
+  // Cron Trigger (wrangler.jsonc): stamps one non-personal row, so the Free project sees database activity and is not paused.
+  // A failure throws, so the run shows as failed under the Worker's Cron Triggers in the Cloudflare dashboard.
+  async scheduled(controller, env) {
+    if (!supabaseConfigured(env)) throw new Error('contact: Supabase is not configured');
+    let status = 0;
+    try { status = await rpc(env, 'contact_keepalive', {}, Date.now() + SUPABASE_ATTEMPT_MS); } catch {}
+    if (status < 200 || status >= 300) throw new Error(`contact: keepalive status ${status}`);
   },
 };
