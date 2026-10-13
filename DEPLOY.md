@@ -1,36 +1,45 @@
 # Finish contact delivery
 
-The page and contact service are separate: GitHub Pages hosts the page; Cloudflare receives the form and sends the email. The account steps below are the only remaining connection work.
+The page and contact service are separate: GitHub Pages hosts the page; a Cloudflare Worker receives the form and stores each
+enquiry in the owner's private Supabase database. No DNS or mail settings change. The account steps below are the only
+remaining connection work; the full runbook, with every command, the lockdown checks and key rotation, is
+[docs/CONTACT-SUPABASE.md](docs/CONTACT-SUPABASE.md). Both services run on their free plans.
 
-## 1. Prepare email in Cloudflare
+## 1. Prepare the Supabase project
 
-Sign in to the Cloudflare account containing `twentynineeleven.net`.
+The owner signs in; the lead runs the commands with the owner present (runbook sections 1-5):
 
-- Open **Compute → Email Service** and verify `contact@twentynineeleven.net` as a destination address using its verification email.
-- Onboard `twentynineeleven.net` as the sending domain, so the Worker can send from `enquiry@twentynineeleven.net`.
-- If your mailbox already uses another provider, use **Email Sending** onboarding and preserve the existing receiving MX records. Email Routing onboarding changes those MX records. See Cloudflare's [domain instructions](https://developers.cloudflare.com/email-service/configuration/domains/).
-
-Mail to a verified destination is supported on all Cloudflare plans. See [current pricing](https://developers.cloudflare.com/email-service/platform/pricing/). Email Sending availability and any account activation are determined by Cloudflare.
+- Keep the database password only in a password manager: no copy in a plain file, note or chat.
+- Turn on MFA for the Supabase account; keep the organization to the owner.
+- Create a dedicated Free project. Data API exposed schemas stay `public, graphql_public` (never `intake`); Auth sign-ups off;
+  Enforce SSL on; network restrictions if offered.
+- Run `supabase/migrations/20261013120000_contact_intake.sql` once in the SQL Editor (or `npx supabase@2.120.0 db push
+  --linked`), then `supabase/verify/live_checks.sql`: no FAIL row. The Security Advisor must show no ERROR or WARN.
+- Create one secret key named `contact_worker` for the Worker and disable the legacy JWT keys.
 
 ## 2. Deploy the contact endpoint
 
-The easiest browser route imports this repository into Cloudflare Workers:
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fottotheautonomous%2Ftwenty-nine-eleven)
-
-Select the account owning the domain. The root `wrangler.jsonc` and `npm run deploy` are prepared for Workers deployment. This button deploys the **contact backend**; GitHub Pages already handles the visible page. Cloudflare may ask you to connect GitHub. Use Michael's fork as the source if that is your permanent repository.
-
-If you prefer to deploy from this checkout, use:
+Deploy from this checkout. The secrets must exist before the first deploy (`wrangler.jsonc` requires them), and each value is
+typed at a hidden prompt, never into a file or a command line:
 
 ```sh
 npm ci
-npm run contact:login
-npm run contact:deploy
+npx wrangler login
+npx wrangler secret put SUPABASE_URL           # answer y to create the Worker; then https://<project-ref>.supabase.co
+npx wrangler secret put SUPABASE_SECRET_KEY    # the owner pastes the contact_worker key
+npm run check && npm run contact:check && npm run contact:deploy
+npx wrangler logout
 ```
 
-The deployment creates only the Worker and `contact.twentynineeleven.net` custom hostname. It does not change the website's apex or `www` records. If `contact` already has a DNS record, inspect its use before changing it; choose a free hostname and update `wrangler.jsonc` plus the GitHub `CONTACT_ENDPOINT` variable instead.
+The deployment creates only the Worker, the `contact.twentynineeleven.net` custom hostname and one Cron Trigger that keeps the
+Free database from pausing. It does not change the website's apex or `www` records. If `contact` already has a DNS record,
+inspect its use before changing it; choose a free hostname and update `wrangler.jsonc` plus the GitHub `CONTACT_ENDPOINT`
+variable instead.
 
-For later deployment from GitHub, store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository **Secrets** and run **Actions → Deploy contact service to Cloudflare → Run workflow**. Use a token scoped to the account's Workers and this zone's needed DNS/domain permissions. Tokens never belong in page code, repository files, or chat.
+For later deployment from GitHub, store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository **Secrets** and run
+**Actions → Deploy contact service to Cloudflare → Run workflow**; the Worker's secrets carry over to each new version. Use a
+token scoped to the account's Workers and this zone's needed DNS/domain permissions. Tokens and the Supabase key never belong
+in page code, repository files, or chat.
 
 ## 3. Turn on the bot check (Cloudflare Turnstile)
 
@@ -47,7 +56,11 @@ The `GLOBAL_LIMITER` cap (20 enquiries a minute) counts per Cloudflare location,
 
 ## 4. Verify the real form
 
-Open the live page and send an enquiry you authorize for the contact inbox. Confirm the on-page thank-you state **and** the actual inbox receipt; Reply should address the email supplied in the form. Use a name with a comma, such as `Smith, John`, to confirm the Reply-To display name arrives intact. If sending fails, your message stays in the form. Until this check succeeds, email delivery remains unverified.
+Run the live verification in [docs/CONTACT-SUPABASE.md](docs/CONTACT-SUPABASE.md) section 7. In short: the live checks and
+the key-free API probe pass; then send one enquiry you authorize from the live page, using a name with a comma such as
+`Smith, John` and a two-line message. Confirm the on-page thank-you state **and** the stored row in the Supabase Table Editor
+(schema `intake`, table `contact_submissions`). If storing fails, your message stays in the form. Until this check succeeds,
+enquiry storage remains unverified.
 
 ## Use the company domain later
 
