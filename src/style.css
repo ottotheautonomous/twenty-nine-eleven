@@ -4,7 +4,7 @@
 :root {
   font-family: 'Space Grotesk', sans-serif; color: #E7EBEF; background: #06080B; font-synthesis: none;
   --ink: #06080B; --silver: #E7EBEF; --text: #DCE3E9; --text-2: #B6BFC8; --muted: #8C98A5;
-  --dawn: #FFD8A6; --dawn-hi: #FFEBD0; --ember: #F0A65E; --rule: #262C34; --hairline: #27303A; --breach: #E5484D; --error: #ffb3a0;
+  --dawn: #FFD8A6; --dawn-hi: #FFEBD0; --sky: #7DC2FF; --sky-deep: #5AA8FF; --sky-hi: #DCEFFF; --ember: #F0A65E; --rule: #262C34; --hairline: #27303A; --breach: #E5484D; --error: #ffb3a0;
   --visitor-x: 50%; --visitor-y: 45%; --name-w: 100%; --name-h: 100%;
 }
 * { box-sizing: border-box; }
@@ -97,8 +97,8 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 @supports ((background-clip: text) or (-webkit-background-clip: text)) and (color: color-mix(in oklab, red 50%, blue)) {
   .verse-text {
     background-image: radial-gradient(ellipse 78px 46px at var(--verse-x, 50%) var(--verse-y, 50%),
-      color-mix(in oklab, #7DC2FF calc(var(--verse-glow, 0) * 100%), var(--verse-rest)) 0%,
-      color-mix(in oklab, #5AA8FF calc(var(--verse-glow, 0) * 70%), var(--verse-rest)) 48%,
+      color-mix(in oklab, var(--sky) calc(var(--verse-glow, 0) * 100%), var(--verse-rest)) 0%,
+      color-mix(in oklab, var(--sky-deep) calc(var(--verse-glow, 0) * 70%), var(--verse-rest)) 48%,
       var(--verse-rest) 100%);
     -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
   }
@@ -161,7 +161,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .verse-quote p { margin: 0; font-size: 26px; line-height: 1.3; font-weight: 400; letter-spacing: -.02em; color: var(--silver); text-wrap: balance; }
 .verse-word { display: inline; }
 .lord { font-size: .8em; letter-spacing: .06em; }
-.verse-key { font-style: normal; color: var(--dawn); }
+.verse-key { font-style: normal; color: var(--sky); }   /* the promise's own blue, as the footer's visitor light */
 .verse-cite { display: flex; justify-content: center; margin: 20px 0 0; font: 400 11px/1.6 'IBM Plex Mono', monospace; letter-spacing: .07em; color: var(--muted); }
 .verse-ref { position: relative; display: inline-flex; align-items: center; min-height: 26px; font-style: normal; color: var(--text-2); cursor: default; -webkit-user-select: none; user-select: none; }   /* the bullets' response: light wave + underline, nothing moves */
 .text-button { border: 0; border-bottom: 1px solid var(--rule); background: none; color: var(--silver); margin-top: 30px; padding: 10px 0; font-size: 12px; }

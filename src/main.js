@@ -444,7 +444,7 @@ function focusContact() {
 }
 
 // The verse: words take the light in reading order, arriving warm and cooling to their resting colour (CSS owns
-// it: silver, or dawn for "a future and a hope", which therefore stays lit), then the citation.
+// it: silver, or the promise's blue for "a future and a hope", which therefore stays lit), then the citation.
 // Scene still => no decorative text light; the structural panel transition still plays.
 const verseBody = $('#verse-body');
 const verseWords = wrapWords(verseBody.querySelector('p'));
@@ -459,7 +459,7 @@ function revealVerse(live) {
   if (!live) { settleVerse(); return; }
   const first = .7, step = .024, last = first + (verseWords.length - 1) * step;   // words start once the panel has landed (>= 99 %)
   setImmediateMotion([verseRef, ...verseWords], { opacity: 0 });
-  verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: ['#FFEBD0', verseFinal.get(word)] }, {
+  verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: [word.closest('.verse-key') ? '#DCEFFF' : '#FFEBD0', verseFinal.get(word)] }, {
     delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
   })));
   // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
