@@ -80,7 +80,7 @@ model.state.entered = entered;
 const labels = sentinel.labels;
 if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .button-label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .success h3, .success p'), {
   canAnimate: () => !still(),
   onActive: rowActive,
 });
@@ -408,12 +408,42 @@ function highlightContact(active) {
 hover(trigger, () => { highlightContact(true); return () => highlightContact(false); });
 trigger.addEventListener('focus', () => highlightContact(true));
 trigger.addEventListener('blur', () => highlightContact(false));
-// Tactile press on every control.
+// Tactile press without moving text: the arrows answer, the labels stay put.
 const pressSpring = { type: 'spring', stiffness: 400, damping: 30 };
-press('#open-contact, .send-button', element => {
+press(trigger, () => {
   if (still()) return;
-  animate(element, { scale: .97 }, pressSpring);
-  return () => animate(element, { scale: 1 }, pressSpring);
+  animate($('.contact-arrow'), { x: 8 }, pressSpring);
+  return () => animate($('.contact-arrow'), { x: 4 }, pressSpring);
+});
+// The send button rests as a centred label. On hover or focus its arrow draws itself in beside the label with a short
+// glide; a press pushes it forward; leaving retracts it the way it came (the stroke first, then the glide back).
+const sendArrow = $('.send-arrow'), sendArrowPath = sendArrow.querySelector('path');
+let sendArrowOn = false, sendArrowAnims = [];
+function showSendArrow(on) {
+  if (on === sendArrowOn) return;
+  sendArrowOn = on; sendArrowAnims.forEach(control => control.stop());
+  if (still()) { sendArrowAnims = [setImmediateMotion(sendArrow, { opacity: on ? 1 : 0, x: 0 }), setImmediateMotion(sendArrowPath, { pathLength: on ? 1 : 0 })]; return; }
+  const draw = [0.22, 1, 0.36, 1], undraw = [0.64, 0, 0.78, 0];
+  sendArrowAnims = on ? [
+    animate(sendArrow, { opacity: 1 }, { duration: .16, ease: 'easeOut' }),
+    animate(sendArrow, { x: [-8, 0] }, { type: 'spring', stiffness: 260, damping: 24 }),
+    animate(sendArrowPath, { pathLength: [0, 1] }, { duration: .42, ease: draw }),
+  ] : [
+    animate(sendArrowPath, { pathLength: 0 }, { duration: .28, ease: undraw }),
+    animate(sendArrow, { x: -8 }, { duration: .3, ease: undraw }),
+    animate(sendArrow, { opacity: 0 }, { duration: .18, delay: .14, ease: 'easeIn' }),
+  ];
+}
+showSendArrow(false); sendArrowOn = false;
+setImmediateMotion(sendArrowPath, { pathLength: 0 });
+hover(sendButton, () => { showSendArrow(true); return () => { if (document.activeElement !== sendButton || !sendButton.matches(':focus-visible')) showSendArrow(false); }; });
+sendButton.addEventListener('focus', () => { if (sendButton.matches(':focus-visible')) showSendArrow(true); });
+sendButton.addEventListener('blur', () => showSendArrow(false));
+press(sendButton, () => {
+  showSendArrow(true);
+  if (still()) return;
+  animate(sendArrow, { x: 6 }, pressSpring);
+  return () => animate(sendArrow, { x: 0 }, pressSpring);
 });
 hover(verseButton, () => { verseHoverChanged(true); return () => verseHoverChanged(false); });   // the ember warms behind it, as before
 verseButton.addEventListener('focus', () => { const r = verseText.getBoundingClientRect(); lightVerse(r.left + r.width / 2, r.top + r.height / 2, 1); });

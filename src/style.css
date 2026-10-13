@@ -124,7 +124,7 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .dialog-close svg { height: 23px; width: 23px; stroke: currentColor; stroke-width: 1.2; fill: none; }
 .dialog-close:hover, .dialog-close:focus-visible { color: var(--dawn); background: #ffdfa810; }
 .dialog-content { padding: 39px 39px 28px; }
-.contact-heading { margin-bottom: 29px; }
+.contact-heading { margin-bottom: 29px; text-align: center; }   /* centred like the verse panel; the fields stay left for reading */
 h2 { font-size: 32px; line-height: 1.12; font-weight: 400; letter-spacing: -.03em; margin: 18px 0 15px; }
 .email-address { font: 400 11px/1.6 'IBM Plex Mono', monospace; color: var(--muted); margin: 0; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -140,8 +140,9 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .honeypot { display: none; }
 .turnstile:empty { display: none; }
 .turnstile { margin-top: 14px; }   /* Cloudflare's widget, shown only if it needs an interaction */
-.send-button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 49px; margin-top: 26px; padding: 14px 18px; border: 1px solid var(--dawn); border-radius: 4px; background: var(--dawn); color: #17120a; font-size: 13px; font-weight: 500; }
-.send-button svg { height: 19px; width: 19px; fill: none; stroke: currentColor; stroke-width: 1.25; }
+.send-button { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 49px; margin-top: 26px; padding: 14px 18px; border: 1px solid var(--dawn); border-radius: 4px; background: var(--dawn); color: #17120a; font-size: 13px; font-weight: 500; }
+.send-inner { position: relative; display: inline-flex; align-items: center; }   /* the label is centred; the arrow hangs off its right edge and never shifts it */
+.send-arrow { position: absolute; left: 100%; top: 50%; height: 19px; width: 19px; margin: -9.5px 0 0 12px; fill: none; stroke: currentColor; stroke-width: 1.25; opacity: 0; pointer-events: none; }
 .send-button:disabled { opacity: .65; }
 .send-button:hover:not(:disabled), .send-button:focus-visible { background: var(--dawn-hi); border-color: var(--dawn-hi); box-shadow: 0 0 28px #ffdfa81a; }
 .send-button:active:not(:disabled) { background: #f0cf94; }
