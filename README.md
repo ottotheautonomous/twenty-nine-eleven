@@ -6,9 +6,9 @@ Every scene input is a [Motion](https://motion.dev/) value and the render loop r
 
 **Website:** [ottotheautonomous.github.io/twenty-nine-eleven](https://ottotheautonomous.github.io/twenty-nine-eleven/)
 
-The form submits directly to a Cloudflare Worker. It delivers to `contact@twentynineeleven.net` with the visitor's email as Reply-To. Visitors stay on the page. Success appears only after Cloudflare accepts the message; errors retain the draft. No email-app handoff, analytics or third-party font requests.
+The form submits directly to a Cloudflare Worker. The Worker checks the request (allowed origin, rate limits, bot check, validation) and stores the enquiry — the name, email address and message you typed, a random submission reference and the site it was sent from — in the owner's private Supabase database, where only the owner can read it. Nothing else is recorded: no IP address, no browser details, and the Worker keeps no log of enquiry contents. Visitors stay on the page. Success appears only after the database has accepted the enquiry; errors retain the draft. No email-app handoff, analytics or third-party font requests.
 
-**Delivery status:** the frontend is ready; live email delivery requires Cloudflare account setup. See [DEPLOY.md](DEPLOY.md) for the shortest path. Do not call the form operational until a real submission arrives in the inbox.
+**Delivery status:** the frontend is ready; storing enquiries requires the Supabase project and the Worker deployment in [DEPLOY.md](DEPLOY.md) (full runbook: [docs/CONTACT-SUPABASE.md](docs/CONTACT-SUPABASE.md)). Do not call the form operational until a real submission appears in the owner's table.
 
 ## Run locally
 
@@ -25,13 +25,13 @@ npm run contact:check
 npm run build
 ```
 
-`check` exercises the contact backend with stubbed email; `contact:check` packages the Worker without publishing. Neither sends messages. `build` produces the static site in `dist/`.
+`check` exercises the contact backend with a stubbed database; `contact:check` packages the Worker without publishing. Neither stores anything. `build` produces the static site in `dist/`. The database migration has its own offline proof: `bash supabase/verify/offline-pg16.sh` (local PostgreSQL 16, no network).
 
 ## Hosting
 
 - The GitHub Pages workflow builds and publishes `dist/` on pushes to `main`.
-- The Cloudflare Worker lives in `worker/index.mjs`; its root `wrangler.jsonc` fixes the endpoint to `contact.twentynineeleven.net/api/contact`.
-- Set the GitHub repository variable `CONTACT_ENDPOINT` if you choose a different contact hostname, then rerun the Pages workflow.
+- The Cloudflare Worker lives in `worker/index.mjs`; it answers at `https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact` (ottotheautonomous Cloudflare account, `wrangler.jsonc`). Enquiries are stored in the owner's Supabase project (`supabase/migrations/`); its URL and key exist only as Cloudflare Worker secrets.
+- The GitHub repository variables `CONTACT_ENDPOINT` and `TURNSTILE_SITE_KEY` feed the Pages build; after changing either, rerun the Pages workflow.
 - No custom domain is attached to Pages yet. Domain DNS remains a separate setup step.
 
 ## Share with Michael

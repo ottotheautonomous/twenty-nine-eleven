@@ -10,7 +10,7 @@ function securityHeaders() {
     name: 'security-headers',
     apply: 'build',
     configResolved({ env }) {   // the same resolved settings the bundle is built with
-      contact = new URL(env.VITE_CONTACT_ENDPOINT || 'https://contact.twentynineeleven.net/api/contact').origin;
+      contact = new URL(env.VITE_CONTACT_ENDPOINT || 'https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact').origin;
       turnstile = env.VITE_TURNSTILE_SITE_KEY ? ' https://challenges.cloudflare.com' : '';   // Cloudflare's bot check: its script and frame, only when configured
     },
     transformIndexHtml(html) {
