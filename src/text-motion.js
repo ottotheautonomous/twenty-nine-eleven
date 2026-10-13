@@ -117,7 +117,8 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
   for (const record of records.values()) {
     if (record.element.matches('.service')) {
       const li = record.element.closest('li');
-      record.dots = [li.previousElementSibling?.querySelector('.service-separator'), li.querySelector('.service-separator')].filter(Boolean);
+      let prev = li.previousElementSibling; while (prev?.matches('.services-break')) prev = prev.previousElementSibling;   // a row's line break holds no dot: the word after it shares the dot before it
+      record.dots = [prev?.querySelector('.service-separator'), li.querySelector('.service-separator')].filter(Boolean);
     }
     cleanups.push(hover(record.element, (_, event) => {
       const rect = record.element.getBoundingClientRect();
