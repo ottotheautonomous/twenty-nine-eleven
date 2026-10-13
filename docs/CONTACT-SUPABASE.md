@@ -62,7 +62,10 @@ for it.
 
 1. Sign in at https://supabase.com/dashboard with the owner's chosen account. Its exact address is recorded in the password
    manager entry, not in this repository.
-2. Account settings: turn on **multi-factor authentication** (authenticator app). Store the recovery codes in the password manager.
+2. Account settings → Security (https://supabase.com/dashboard/account/security): turn on **multi-factor authentication**
+   (authenticator app). Supabase issues no recovery codes: register a **second TOTP factor on a different device or app** as
+   the backup, and note in the password manager which devices hold the factors. Losing every factor locks the account for
+   good (Supabase: it "will not be able to restore access"), and with it the only way to read the enquiries.
 3. Organization → Team: the owner is the only member. No invitations. (Enforcing MFA for a whole organization is a paid
    feature; with one member, the owner's own MFA is the control.)
 4. The project in section 3 is for the contact form alone. Never put anything else in it: the migration removes PUBLIC's
@@ -194,7 +197,8 @@ Turnstile is on (section 8, required)**.
 5. **Advisors**: Security Advisor shows 0 ERROR and 0 WARN (section 4c, including any recorded owner acceptance).
 6. **Keep-alive**: after the next 03:17, 11:17 or 19:17 UTC, `select beat_at from intake.keepalive;` has moved, and the
    Worker's Cron Triggers page in the Cloudflare dashboard shows a successful run.
-7. **Account hygiene**, ticked by the owner: Supabase MFA on; organization = owner only; Enforce SSL on; network restrictions
+7. **Account hygiene**, ticked by the owner: Supabase MFA on; second MFA factor registered on a different device or app;
+   organization = owner only; Enforce SSL on; network restrictions
    applied (the two documentation entries shown as applied, not the default empty list) and the SQL Editor still answers
    `select 1;` (or the reason they are off recorded in `VALIDATION.md`, section 3 step 4); the database password only in the password manager, no plain-text copy left, and
    reset after any plain-text exposure (section 1); legacy JWT keys disabled; Auth sign-ups off; exposed schemas =
@@ -379,7 +383,9 @@ and while that token exists it can run SQL on the database, which means reading 
   https://supabase.com/changelog/scoped-personal-access-tokens-ga.md
 - Supabase CLI 2.120.0, read offline: `logout` is "Log out and delete access tokens locally" (no revoke call); the CLI takes
   a token from "the SUPABASE_ACCESS_TOKEN environment variable".
-- Supabase, Multi-factor authentication for your account: https://supabase.com/docs/guides/platform/multi-factor-authentication
+- Supabase, Multi-factor authentication for your account ("Supabase does not return recovery codes"; register a backup
+  TOTP factor on "a different device and app"; access cannot be restored if every factor is lost; read 2026-10-13):
+  https://supabase.com/docs/guides/platform/multi-factor-authentication
 - Supabase, Backups (Free: export regularly): https://supabase.com/docs/guides/platform/backups
 - PostgreSQL, Row security policies ("Superusers and roles with the BYPASSRLS attribute always bypass the row security system";
   FORCE ROW LEVEL SECURITY; default deny): https://www.postgresql.org/docs/current/ddl-rowsecurity.html
