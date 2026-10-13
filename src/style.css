@@ -231,7 +231,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .services-secondary { gap: 4px; }
   .services-secondary li { gap: 4px; }
 }
-@media (max-width: 600px) and (max-height: 640px) {
+/* short phones (incl. 375x667, where the four index lines fill the regular layout edge to edge and the caption above the cage would sit 2 px from the top) */
+@media (max-width: 600px) and (max-height: 700px) {
   .scene { padding: 22px 18px; }
   .mark-anchor { height: min(44vw, 24svh); margin-bottom: 12px; }
   h1 { font-size: 38px; }
