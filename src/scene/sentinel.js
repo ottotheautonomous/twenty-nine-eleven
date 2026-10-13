@@ -71,17 +71,18 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const quality = { bloomLevels: tier.bloomLevels, hdrScale: tier.hdrScale, jacobi: tier.jacobi, fluidRes: tier.fluidRes };   // tier values; no rung changes them any more
   const xeRows = (tier.rowsStart || 0) > 256;
   // Rungs are data. The governor reads only expect (the share of its signal the rung should save, measured 1440x900@2; 0.10 when a
-  // rung omits it), max (optional: what it would save if the frame were nothing but what it cuts), skip() and apply(dir); visual
-  // (0 invisible … 3 the identity: thick, dense, crisp strands) and target (the signal it relieves) are documentation, and the
-  // LADDER order below is the whole policy. skip() = a no-op from the current state: a rung applies only from its own "from" state
-  // (prevK / prevN), so a locked rung is never jumped over, and a scale rung whose floor-clamped value would not change the backing
-  // is skipped (at dpr 1 both scale rungs skip: resolution is never touched there).
+  // rung omits it), max (optional: what it would save if the frame were nothing but what it cuts), keepMin (optional: the frame-rate
+  // gain an inferred GL trial must show to keep the rung, default 0.15), skip() and apply(dir); visual (0 invisible … 3 the identity:
+  // thick, dense, crisp strands) and target (the signal it relieves) are documentation, and the LADDER order below is the whole
+  // policy. skip() = a no-op from the current state: a rung applies only from its own "from" state (prevK / prevN), so a locked rung
+  // is never jumped over, and a scale rung whose floor-clamped value would not change the backing is skipped (at dpr 1 both scale
+  // rungs skip: resolution is never touched there).
   // Brain rungs register the same way, e.g. RUNGS.brainHalf = { id: 'brainHalf', visual: 0, target: 'gpu', expect: 0.10,
   // skip: () => !brainData, apply(dir) {...} }, and insert their ids in LADDER below.
   const scaleRung = (id, k, prevK, visual, expect) => ({ id, visual, target: 'gpu', expect, max: 1 - (k / prevK) ** 2, fails: 0,
     skip: () => Math.abs(rel - Math.max(1 / cap, prevK)) > 1e-3 || Math.max(k, 1 / cap) >= rel - 1e-3,   // never below 1 backing px per CSS px, nor k × cap
     apply(dir) { rel = Math.max(1 / cap, dir < 0 ? k : prevK); resize(); } });
-  const rowsRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'gpu', expect, max: 1 - n / prevN, fails: 0, skip: () => rows !== prevN,
+  const rowsRung = (id, n, prevN, visual, expect, keepMin) => ({ id, visual, target: 'gpu', expect, max: 1 - n / prevN, keepMin, fails: 0, skip: () => rows !== prevN,
     apply(dir) { rows = dir < 0 ? n : prevN; renderer.setRows?.(rows); } });
   const spritesRung = (id, n, prevN, visual, expect) => ({ id, visual, target: 'cpu', expect, max: 1 - n / prevN, fails: 0, skip: () => renderer.sprites !== prevN,
     apply(dir) { renderer.setSprites?.(dir < 0 ? n : prevN); } });
@@ -96,9 +97,11 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // Particle rows: the tier's own ladder when it has one (tier.rowsLadder, e.g. [768, 512, 256, 128]), else halving from rowsStart
   // down to the floor (xe 128, the others 64): xe 512 -> rows256 -> rows128, uhd/phones 128 -> rows64. Each step is one rung named by
   // the count it lands on. Light is conserved below the 131k reference (webgl.js countGain): fewer rows are sparser, never dimmer.
+  // The thickness steps (from 256 rows or fewer: phones' rows64, xe rows128) keep without the timer only for a 30 % frame-rate gain:
+  // under CPU contention a vsync'd phone's two trial windows read 15-25 % from a rows cut that cannot help a fill-bound frame.
   const rowsFloor = tier.rowsFloor || (xeRows ? 128 : 64), rowsSteps = tier.rowsLadder ? [...tier.rowsLadder] : [];
   if (!tier.rowsLadder) for (let n = tier.rowsStart || 0; n >= rowsFloor; n /= 2) rowsSteps.push(n);
-  const rowsIds = rowsSteps.slice(1).map((n, i) => { const id = `rows${n}`, from = rowsSteps[i]; RUNGS[id] = rowsRung(id, n, from, from > 256 ? 2 : 3, from > 256 ? 0.25 : 0.10); return id; });
+  const rowsIds = rowsSteps.slice(1).map((n, i) => { const id = `rows${n}`, from = rowsSteps[i]; RUNGS[id] = rowsRung(id, n, from, from > 256 ? 2 : 3, from > 256 ? 0.25 : 0.10, from > 256 ? undefined : 0.3); return id; });
   // Ladders: shed in order, restored LIFO. Invisible rungs (the brain's) go first; thickness and crispness go last, mildest first.
   const LADDER = tier.name === 'c2d' ? ['sprites2000', 'sprites1000']
     : xeRows ? ['scale80', ...rowsIds.slice(0, 1), 'scale64', ...rowsIds.slice(1)] : ['scale80', ...rowsIds];
@@ -164,13 +167,16 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   // Governor (policy: .review/gov/fable/GOV-SPEC.md). Full quality is the resting state. It acts only on proof that OUR frame is
   // the bottleneck: measured mode (desktop Chromium) reads our own GPU time per frame from a timer query, so CPU jank from other
   // processes or another page's GPU load can never shed anything; inferred mode (no timer: Safari, Firefox, phones, Canvas2D) needs
-  // slow frames, a deep GPU queue and a light main thread, sheds at most two rungs per session, never while idle short of a panic,
-  // and every step is a trial that must save a measurable share within ~3 s or it is undone and locked. Thickness, density and
-  // crispness go last and never below the floors (1 backing px per CSS px; xe rows 128, others 64; sprites 1000). Restores are LIFO,
-  // predicted from the saving measured at the shed, and the dead band between "slow" and "calm" keeps it from oscillating. A saving
-  // is one reading, so it is capped at what the rung can give, and a state at half the budget gets one revertible restore per rung
-  // per 10 min regardless.
-  // Statistics are medians of ~1 s windows; start-up, entrance, modal, resize and visibility changes are holds.
+  // slow frames (on GL the mean interval, as vsync quantizes medians, with the median frame late too), a deep GPU queue and a light
+  // main thread, sheds at most two rungs per session and only on sustained panic (<= 35 fps for ~6 s on GL), keeps a GL rung only
+  // for a 15 % frame-rate gain (30 % for a thickness step), and every step is a trial that must save a measurable share within ~3 s
+  // or it is undone and locked.
+  // Thickness, density and crispness go last and never below the floors (1 backing px per CSS px; xe rows 128, others 64; sprites
+  // 1000). Restores are LIFO, predicted from the saving measured at the shed, and the dead band between "slow" and "calm" keeps it
+  // from oscillating. A saving is one reading, so it is capped at what the rung can give, and a state at half the budget gets one
+  // revertible restore per rung per 10 min regardless. Inferred restores cannot predict, so each one that hurts doubles the calm the
+  // next needs; nothing is pinned. Statistics are medians of ~1 s windows (inferred GL: the mean interval); start-up, entrance, modal,
+  // resize and visibility changes are holds.
   function pushWindow(now, iv, cpu, gpuSamples, lag) {
     const w = gov.win ||= { t0: now, iv: [], cpu: [], gpu: [], lag: [] };
     w.iv.push(iv); w.cpu.push(cpu); if (lag > 0) w.lag.push(lag);
@@ -178,7 +184,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (now - w.t0 < 1000 || w.iv.length < 8) return;
     gov.win = null;
     // gpuMed needs 10 timer samples, or all but 2 of the window's frames when it holds fewer (at 7 fps a window closes at 8 frames)
-    const closed = { t: now, n: w.iv.length, ms: now - w.t0, ivMed: median(w.iv), cpuMed: median(w.cpu), gpuMed: w.gpu.length >= Math.min(10, w.iv.length - 2) ? median(w.gpu) : NaN, lagMed: w.lag.length ? median(w.lag) : NaN };
+    const closed = { t: now, n: w.iv.length, ms: now - w.t0, ivMed: median(w.iv), ivMean: w.iv.reduce((a, b) => a + b, 0) / w.iv.length, cpuMed: median(w.cpu), gpuMed: w.gpu.length >= Math.min(10, w.iv.length - 2) ? median(w.gpu) : NaN, lagMed: w.lag.length ? median(w.lag) : NaN, lagMax: w.lag.length ? Math.max(...w.lag) : NaN };
     gov.lastWin = closed;
     judge(closed, now);
   }
@@ -192,10 +198,15 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const med = median(rafIv), agree = rafIv.filter((x) => Math.abs(x - med) < 1.5).length / rafIv.length;
     if (agree < 0.5 || med >= 45 || Math.abs(med - refresh) <= 0.03 * refresh) return;
     if (med < refresh) { refresh = med; return; }
-    const w = gov.lastWin, own = !w ? NaN : timer ? Math.max(w.gpuMed, w.cpuMed) : fence ? (w.lagMed < 2 ? w.cpuMed : NaN) : w.cpuMed;   // NaN: unknown
+    // The own-cost evidence must be about the slower frames themselves: a window that ran at the new pace (not the cheaper state
+    // before a restore, nor the one closed just before a load began) in which, without the timer, every frame finished within a refresh
+    const w = gov.lastWin; if (!w || w.ivMed < 0.9 * med) return;
+    const own = timer ? Math.max(w.gpuMed, w.cpuMed) : fence ? (w.lagMax < 2 ? w.cpuMed : NaN) : w.cpuMed;   // NaN: unknown
     if (own < 0.5 * refresh) refresh = med;
   }
-  const signalOf = (w) => (gov.mode === 'measured' ? w.gpuMed : w.ivMed);
+  // Inferred GL reads the window's MEAN interval (1000 / fps): a vsync'd display quantizes intervals to whole refreshes, so the
+  // median of a bimodal window sits on a knife edge (16.7 / 25 / 33.3 ms as the mix tips) while the mean moves smoothly with the cost.
+  const signalOf = (w) => (gov.mode === 'measured' ? w.gpuMed : isGL() ? w.ivMean : w.ivMed);
   function classify(w, B) {
     const c2d = !isGL();
     if (gov.mode === 'measured') {
@@ -212,8 +223,19 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     const lagOk = c2d || (Number.isFinite(w.lagMed) && w.lagMed >= 2);
     // C2D: our CPU share counts only while frames are actually late (under contention a 14 ms draw reads 21-25 ms on time)
     // GL: a busy main thread is not a GPU cost, unless the GPU queue is 3+ frames deep (a full command buffer blocks our gl calls)
-    const slow = c2d ? (w.ivMed >= 1.4 * B || (w.cpuMed >= 0.6 * B && w.ivMed >= 1.15 * B)) : (w.ivMed >= 1.4 * B && (w.cpuMed < 0.5 * B || w.lagMed >= 3) && lagOk && !bad);
-    return { slow, panic: w.ivMed >= 2.0 * B && lagOk, calm: w.ivMed <= 1.1 * B && w.cpuMed < (c2d ? 0.45 : 0.5) * B, fast: false, usable: true };
+    // GL panic at 1.7 B (<= 35 fps on a 60 Hz tier): 2.0 B is exactly two refreshes, a knife edge under vsync
+    // GL slow and panic also need the median frame late (half the frames or more missed a refresh): our GPU paces every frame alike,
+    // so when it is the bottleneck the typical frame is late, while dropped frames from CPU contention raise the mean over a median
+    // at one refresh. A fence that reads 2+ even when light (a pipelined driver) cannot tell those apart; the median can
+    const iv = c2d ? w.ivMed : w.ivMean, late = c2d || w.ivMed >= 1.4 * B;
+    const slow = c2d ? (w.ivMed >= 1.4 * B || (w.cpuMed >= 0.6 * B && w.ivMed >= 1.15 * B)) : (iv >= 1.4 * B && late && (w.cpuMed < 0.5 * B || w.lagMed >= 3) && lagOk && !bad);
+    // GL calm: the mean, or the median when most fences of the window (the median fence) signalled within one refresh. The GPU kept
+    // up, so a mean above the median is dropped frames our cost did not cause (other processes), and they must not hold a shed state
+    // after its load ends. Most, not every: under CPU contention the browser's GPU process is starved too and its fence misses the
+    // dropped frames (real GPU, 32 busy loops: a lag of 2+ in 97 of 105 windows), while a GPU that is the bottleneck stays behind on
+    // nearly every frame
+    const calmIv = iv <= 1.1 * B || (!c2d && w.ivMed <= 1.1 * B && w.lagMed < 2);
+    return { slow, panic: iv >= (c2d ? 2.0 : 1.7) * B && late && lagOk, calm: calmIv && w.cpuMed < (c2d ? 0.45 : 0.5) * B, fast: false, usable: true };
   }
   function nextRung(now) {
     for (const id of LADDER) {
@@ -228,9 +250,9 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     gov.changes.push({ t: Math.round(now), id, dir, reason, ...extra }); if (gov.changes.length > 200) gov.changes.shift();
   }
   function shed(now, id, reason, trial = true) {
-    // baseline = the windows that voted (slow or panic) among the last two (measured) or four (inferred), so neither a spike nor a
+    // baseline = the windows that voted (slow or panic) among the last two (measured) or six (inferred), so neither a spike nor a
     // window from before the load began can fake a saving or a loss
-    const r = RUNGS[id], recent = gov.hist.slice(gov.mode === 'measured' ? -2 : -4).filter((h) => h.slow || h.panic), med2 = (k) => median(recent.map((h) => h[k]).filter(Number.isFinite));
+    const r = RUNGS[id], recent = gov.hist.slice(gov.mode === 'measured' ? -2 : -6).filter((h) => h.slow || h.panic), med2 = (k) => median(recent.map((h) => h[k]).filter(Number.isFinite));
     const before = recent.length ? med2('sig') : signalOf(gov.lastWin), cpuBefore = recent.length ? med2('cpu') : gov.lastWin.cpuMed;
     r.apply(-1); gov.steps.push(id);
     gov.trial = trial ? { id, before, cpuBefore, wins: [], cpu: [], vs: [] } : null; gov.probe = null;
@@ -267,7 +289,9 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (gov.trial) {                                                        // did the step help?
       const t = gov.trial; t.wins.push(v.sig); t.cpu.push(w.cpuMed); t.vs.push(v); gov.verdict = 'trial';
       if (t.wins.length < 2) return;
-      const after = median(t.wins), r = RUNGS[t.id], keep = Math.max(0.06, 0.35 * expectOf(r));
+      // inferred GL: the frame rate must rise by 15 % (vsync mixing moves a window's mean by a few %, a headed compositor by ~10 %),
+      // or by the rung's own keepMin (the thickness steps: 30 %)
+      const after = median(t.wins), r = RUNGS[t.id], keep = Math.max(gov.mode === 'inferred' && isGL() ? (r.keepMin ?? 0.15) : 0.06, 0.35 * expectOf(r));
       let saved = 1 - after / Math.max(1e-6, t.before);
       if (gov.mode === 'inferred' && !isGL() && t.cpuBefore > 0) saved = Math.max(saved, 1 - median(t.cpu) / t.cpuBefore);   // C2D: cutting draw CPU is a win too
       if (t.wins.length < 4 && Math.abs(saved - keep) < 0.05) return;     // too close to call on two windows: two more (~2 s)
@@ -291,25 +315,27 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       if (v.slow) {
         const r = RUNGS[p.id], cost = 1 - p.before / Math.max(1e-6, v.sig);    // what the rung really saves, as the restore just showed
         if (cost > (r.learned ?? expectOf(r))) r.learned = Math.min(boundOf(r), cost);   // so the next prediction waits for a real drop
-        const flips = (gov.flips.get(p.id) || []).filter((t) => now - t < 120000); flips.push(now);
+        // measured: 3 flips in 120 s pin the rung for 600 s. Inferred: no pin (a shed state at the display rate cannot show that the
+        // load ended, so a pin would outlive it); each flip doubles the calm windows the next restore needs (8, 16, 32, 64 = ~70 s)
+        const inf = gov.mode === 'inferred', flips = (gov.flips.get(p.id) || []).filter((t) => inf || now - t < 120000); flips.push(now);
         shed(now, p.id, `restore hurt (flip ${flips.length})`, false);
-        if (flips.length >= 3) { gov.pins.set(p.id, now + 600000); gov.flips.delete(p.id); } else gov.flips.set(p.id, flips);
+        if (!inf && flips.length >= 3) { gov.pins.set(p.id, now + 600000); gov.flips.delete(p.id); } else gov.flips.set(p.id, flips);
         govHold(3000); return;
       }
-      if (p.wins >= 3) gov.probe = null;
+      if (p.wins >= 3) { gov.probe = null; if (gov.mode === 'inferred') gov.flips.delete(p.id); }   // the restore held: the flips are forgiven
     }
     gov.hist.push(v); if (gov.hist.length > 6) gov.hist.shift();
-    const votes = gov.hist.slice(-4).filter((h) => h.slow).length, last2 = gov.hist.slice(-2);
-    // idle, and C2D always: slow in 5 of the last 6 windows with 2+ panics (iv >= 2 budget): longer than any burst or a 2.5 s sentry
-    // pass; a C2D frame under CPU contention reads like our own cost, so only GL with a deep GPU queue sheds on 3 votes while active
+    const last2 = gov.hist.slice(-2);
+    // inferred (GL and C2D, active or idle): sustained slowness only, slow in 5 of the last 6 windows with 2+ panics: longer than any
+    // burst or a 2.5 s sentry pass; a frame under CPU contention reads like our own cost, so nothing shorter is evidence without the timer
     const sustained = gov.hist.length >= 6 && gov.hist.filter((h) => h.slow).length >= 5 && gov.hist.filter((h) => h.panic).length >= 2;
     const wantShed = gov.mode === 'measured' ? (last2.length === 2 && last2.every((h) => h.slow)) || v.panic
-      : now >= gov.backoffUntil && gov.inferredSheds < 2 && (idle || !isGL() ? sustained : votes >= 3);
+      : now >= gov.backoffUntil && gov.inferredSheds < 2 && sustained;
     if (wantShed) {
       const id = nextRung(now);
       if (id) {
         if (gov.mode === 'inferred') gov.inferredSheds++;
-        shed(now, id, v.panic ? 'panic' : gov.mode === 'measured' ? `gpu ${w.gpuMed.toFixed(1)}ms` : `iv ${w.ivMed.toFixed(1)}ms cpu ${w.cpuMed.toFixed(1)}ms lag ${Number.isFinite(w.lagMed) ? w.lagMed : '-'}`);
+        shed(now, id, v.panic ? 'panic' : gov.mode === 'measured' ? `gpu ${w.gpuMed.toFixed(1)}ms` : `iv ${v.sig.toFixed(1)}ms cpu ${w.cpuMed.toFixed(1)}ms lag ${Number.isFinite(w.lagMed) ? w.lagMed : '-'}`);
         gov.verdict = 'shed'; return;
       }
     }
@@ -320,7 +346,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     gov.calm = v.calm ? gov.calm + 1 : v.slow ? 0 : gov.calm;             // mid: neither counts nor resets
     gov.calmCheap = gov.calm > 0 && (gov.calmCheap || Boolean(v.cheapOnly));   // a counted window that only the half-budget rule made calm
     if (gov.probe) return;                                                  // calm keeps counting through a probe: restores ~4.5 s apart
-    const need = gov.mode === 'measured' ? (v.fast ? 3 : 5) : 8;
+    const need = gov.mode === 'measured' ? (v.fast ? 3 : 5) : 8 << Math.min(3, (gov.flips.get(top) || []).length);   // inferred: 8, 16, 32, 64 after each restore that hurt
     if (gov.calm >= need) restore(now, top, v.sig);
   }
 
@@ -364,7 +390,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
       const stack = gov.steps.length ? gov.steps.join('+') : 'full';
       const locks = [...gov.locks].filter(([, u]) => now < u).map(([id, u]) => `${id} ${u === Infinity ? 'session' : Math.round((u - now) / 1000) + 's'}`)
         .concat([...gov.pins].filter(([, u]) => now < u).map(([id, u]) => `pin ${id} ${Math.round((u - now) / 1000)}s`)).join(', ');
-      const signals = `gpu ${f(w?.gpuMed, 2)} iv ${f(w?.ivMed)} cpu ${f(w?.cpuMed)} lag ${f(w?.lagMed, 0)} | B ${budgetMs().toFixed(1)}`;
+      const signals = `gpu ${f(w?.gpuMed, 2)} iv ${f(w?.ivMed)}${gov.mode === 'inferred' && isGL() ? `/${f(w?.ivMean)}` : ''} cpu ${f(w?.cpuMed)} lag ${f(w?.lagMed, 0)} | B ${budgetMs().toFixed(1)}`;
       readoutEl.textContent = `${renderer.type} ${tier.name} ${Math.round(1000 / drawEma)}fps ${scale.toFixed(2)}x ${canvas.width}x${canvas.height}${rows && isGL() ? ` rows ${rows}` : ''}${renderer.sprites ? ` sprites ${renderer.sprites}` : ''}${gov.steps.length ? ` step ${gov.steps.length}` : ''} | integrity ${model.state.integrity.toFixed(3)} vel ${model.state.vel.toFixed(2)} labels ${model.labels.length}${renderer.glError ? ` | gl ${renderer.glError()}` : ''}\n`
         + (gov.mode === 'off' ? `gov off | ${signals}` : `gov ${gov.mode} ${gov.verdict} | ${signals} | ${stack} | last: ${gov.last}${locks ? ` | locks: ${locks}` : ''}`);
     }
@@ -433,7 +459,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
         ladder: [...LADDER], steps: [...gov.steps], locks: Object.fromEntries(gov.locks), pins: Object.fromEntries(gov.pins),
         flips: Object.fromEntries([...gov.flips].map(([id, t]) => [id, t.length])), cheapAt: Object.fromEntries(gov.cheapAt), last: gov.last, inferredSheds: gov.inferredSheds,
         trial: gov.trial && { id: gov.trial.id, before: gov.trial.before, wins: [...gov.trial.wins] }, probe: gov.probe && { ...gov.probe },
-        window: w && { ivMed: w.ivMed, gpuMed: w.gpuMed, cpuMed: w.cpuMed, lagMed: w.lagMed, n: w.n, fps: ((w.n - 1) * 1000) / w.ms }, changes: gov.changes.map((c) => ({ ...c })) };
+        window: w && { ivMed: w.ivMed, ivMean: w.ivMean, gpuMed: w.gpuMed, cpuMed: w.cpuMed, lagMed: w.lagMed, n: w.n, fps: ((w.n - 1) * 1000) / w.ms }, changes: gov.changes.map((c) => ({ ...c })) };
     },
   };
 }
