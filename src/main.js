@@ -5,7 +5,6 @@ import { createTextMotion } from './text-motion.js';
 import { uniforms, engage, idle, settled } from './scene-state.js';
 import { CLASS, ROW_READING } from './scene/shape.js';
 import { RESET } from './scene/constants.js';
-import { decode, stopDecode } from './scene/decode.js';
 import { wrapWords } from './verse-light.js';
 import { turnstileEnabled, prepareTurnstile, turnstileToken } from './turnstile.js';
 
@@ -433,35 +432,31 @@ function focusContact() {
 }
 
 // The verse: words take the light in reading order, arriving warm and cooling to their resting colour (CSS owns
-// it: silver, or dawn for "a future and a hope", which therefore stays lit). Kicker and citation decode.
+// it: silver, or dawn for "a future and a hope", which therefore stays lit), then the citation.
 // Scene still => no decorative text light; the structural panel transition still plays.
 const verseBody = $('#verse-body');
 const verseWords = wrapWords(verseBody.querySelector('p'));
 const verseFinal = new Map(verseWords.map(word => [word, getComputedStyle(word).color]));
-const verseKicker = $('.verse-kicker'), verseRef = $('.verse-ref');
+const verseRef = $('.verse-ref');
 let verseFlash = null;
 function settleVerse() {
-  setImmediateMotion([...verseWords, verseKicker, verseRef], { opacity: 1 });
+  setImmediateMotion([...verseWords, verseRef], { opacity: 1 });
   verseWords.forEach(word => setImmediateMotion(word, { color: verseFinal.get(word) }));
-  decode(verseKicker, { reduced: true });
 }
 function revealVerse(live) {
   if (!live) { settleVerse(); return; }
   const first = .7, step = .024, last = first + (verseWords.length - 1) * step;   // words start once the panel has landed (>= 99 %)
-  setImmediateMotion(verseKicker, { opacity: 1 });
   setImmediateMotion([verseRef, ...verseWords], { opacity: 0 });
   verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: ['#FFEBD0', verseFinal.get(word)] }, {
     delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
   })));
-  decode(verseKicker, { duration: .6, alphaDuration: .3, fraction: .6, delay: .6 });
   // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
   modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .3, ease: 'easeOut' }));
   verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 1100); }, last + .2);
 }
 function concealVerse() {
   verseFlash?.(); verseFlash = null;
-  stopDecode(verseKicker);
-  modalAnimations.push(animate([...verseWords, verseKicker, verseRef], { opacity: 0 }, { duration: .12 }));
+  modalAnimations.push(animate([...verseWords, verseRef], { opacity: 0 }, { duration: .12 }));
 }
 
 const dialogs = {
