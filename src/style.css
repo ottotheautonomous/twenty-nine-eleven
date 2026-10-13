@@ -275,6 +275,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .dialog-content { padding: 22px 28px 20px; }
   h2 { font-size: 24px; margin: 8px 0 8px; }
   .contact-heading { margin-bottom: 16px; }
+  .field input, .field textarea { font-size: 16px; }   /* every phone held sideways is 724-932 wide, past the <= 600 rule: under 16 px iOS Safari zooms the page on focus */
   .verse-surface .dialog-content { padding: 28px 28px 24px; }
   .verse-quote p { font-size: 21px; }
   .verse-cite { margin-top: 14px; }
