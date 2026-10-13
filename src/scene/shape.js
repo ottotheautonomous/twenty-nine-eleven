@@ -82,13 +82,17 @@ export function pickNodes(homes, count = NODES, from = Math.min(4096, homes.leng
   const at = (i) => [nodes[i * 3], nodes[i * 3 + 1], nodes[i * 3 + 2]];
   const d2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
   const place = (n, c) => { nodeClass[n] = c; nodeText[n] = POOL[c][counters[c]++ % POOL[c].length]; };
-  // 1. anchors: each class takes the free node nearest its word's rim point (model.js rowHover's point), centre word first (its point is the most contested)
-  for (const c of [...Array(K).keys()].sort((a, b) => Math.abs(ROW_LON[a]) - Math.abs(ROW_LON[b]))) {
-    const rim = [Math.sin(ROW_LON[c]), -1.2, Math.cos(ROW_LON[c])], l = Math.hypot(...rim), p = rim.map((x) => x / l);
-    let best = -1, bd = Infinity;
-    for (let i = 0; i < count; i++) if (nodeClass[i] < 0) { const d = d2(at(i), p); if (d < bd) { bd = d; best = i; } }
-    place(best, c); anchors[c] = best;
-  }
+  // 1. anchors: one node per class, the assignment that minimises the summed distance to the words' rim points (model.js
+  //    rowHover's points), each class choosing among its four nearest nodes: the pins then walk under the row, left to right
+  const rims = ROW_LON.map((lon) => { const r = [Math.sin(lon), -1.2, Math.cos(lon)], l = Math.hypot(...r); return r.map((x) => x / l); });
+  const cands = rims.map((p) => [...Array(count).keys()].sort((a, b) => d2(at(a), p) - d2(at(b), p)).slice(0, 4));
+  let bestSum = Infinity, bestMap = null;
+  (function assign(c, used, map, sum) {
+    if (sum >= bestSum) return;
+    if (c === K) { bestSum = sum; bestMap = [...map]; return; }
+    for (const n of cands[c]) if (!used.has(n)) { used.add(n); map[c] = n; assign(c + 1, used, map, sum + Math.sqrt(d2(at(n), rims[c]))); used.delete(n); }
+  })(0, new Set(), [], 0);
+  bestMap.forEach((n, c) => { place(n, c); anchors[c] = n; });
   // 2. the rest in the fixed hash order: each node joins the class (with room) whose nearest member is farthest from it, so every class spreads round the cage
   const order = [...Array(count).keys()].sort((a, b) => lowbias32(a + 11) - lowbias32(b + 11)).filter((n) => nodeClass[n] < 0);
   for (const n of order.slice(0, K * PER_CLASS - K)) {
