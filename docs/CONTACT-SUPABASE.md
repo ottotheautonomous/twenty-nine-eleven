@@ -16,6 +16,15 @@ computer or local file: those details live in the lead's untracked notes and the
   `wrangler.jsonc`): the account that holds the `twentynineeleven.net` zone grants automation only "Administrator Read Only".
   The page posts there through the repository variable `CONTACT_ENDPOINT`; its CSP follows automatically.
 - Turnstile: a Managed widget in the same account, hostnames `twentynineeleven.net` (covers `www`).
+- Go-live 2026-10-13 ~17:00 UTC: Worker secrets `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (an `sb_secret_` key for this Worker
+  alone) and `TURNSTILE_SECRET` (piped from the Cloudflare API, never displayed). One deploy-check enquiry through the Worker
+  was stored exactly once (a retry with the same request id stored nothing more), its text byte-exact, then deleted; foreign
+  and missing origins answer 403; `live_api_probe.sh` all ok. Page published to `main` (908b37b, tag `sentinel-v1.3.5-live`)
+  with `CONTACT_ENDPOINT` and `TURNSTILE_SITE_KEY`. With the secret set, a tokenless POST answers 403 and stores nothing.
+  Headless Chrome is asked for an interactive check (Cloudflare `interactiveBegin`), so the real-browser enquiry is sent by
+  the owner. Network restrictions applied through the Management API (`192.0.2.1/32`, `2001:db8::1/128`, status applied):
+  direct and pooler Postgres connections are refused (`EADDRNOTALLOWED`); the SQL Editor path (Management API
+  `database/query`) still answers `select 1`. Later database checks run through that path, not `psql`.
 
 ## What this builds
 
