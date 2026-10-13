@@ -91,8 +91,19 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .verse { margin: 28px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.6; letter-spacing: .02em; color: var(--muted); }
 .verse-button { display: inline-block; appearance: none; margin: -6px; padding: 6px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; line-height: inherit; text-align: center; }
 .verse-button:focus-visible { outline-offset: -1px; }
-.verse-text { position: relative; display: inline-block; }   /* carries the rule: the line itself is the way into the verse */
-.verse-rule { position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: #3A4553; pointer-events: none; }   /* the readouts' tick colour: an instrument mark, not a link */
+/* The promise rests at 60 % and a cold blue light follows the visitor across it, bringing the letters near the pointer to
+   full strength (the wordmark's visitor light, in a contrasting key). Touch screens have no passing pointer: full strength. */
+.verse-text { display: inline-block; --verse-rest: color-mix(in oklab, var(--muted) 60%, transparent); color: var(--verse-rest); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) and (color: color-mix(in oklab, red 50%, blue)) {
+  .verse-text {
+    background-image: radial-gradient(ellipse 78px 46px at var(--verse-x, 50%) var(--verse-y, 50%),
+      color-mix(in oklab, #7DC2FF calc(var(--verse-glow, 0) * 100%), var(--verse-rest)) 0%,
+      color-mix(in oklab, #5AA8FF calc(var(--verse-glow, 0) * 70%), var(--verse-rest)) 48%,
+      var(--verse-rest) 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+}
+@media (hover: none) { .verse-text { --verse-rest: var(--muted); } }
 .no-script { font: 11px 'IBM Plex Mono', monospace; color: var(--muted); margin-top: 18px; }
 
 .motion-toggle { position: fixed; z-index: 3; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: 36px; height: 36px; padding: 9px; border: 1px solid #ffffff1f; border-radius: 50%; background: #0a1113cc; color: #9fb3ae; opacity: .6; }

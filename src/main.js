@@ -31,7 +31,7 @@ const surface = $('#contact-dialog .dialog-surface');
 const verseButton = $('#open-verse');
 const verseDialog = $('#verse-dialog');
 const verseSurface = $('#verse-dialog .dialog-surface');
-const verseRule = $('.verse-rule');
+const verseText = $('.verse-text');
 const veil = $('.veil');
 const motionToggle = $('.motion-toggle');
 const form = $('#contact-form');
@@ -64,7 +64,6 @@ let rowIntent = 0;
 let lastDrawnEngage = 0;
 let current = null;            // the open dialog's descriptor (one modal at a time)
 let verseActive = false;
-let verseHover = [];
 let restoring = false;         // the instrument reads RESTORING from the reset's start until it seals or aborts
 const still = () => reducedMotion.matches || paused || params.has('still');
 
@@ -81,7 +80,7 @@ model.state.entered = entered;
 const labels = sentinel.labels;
 if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-button, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .button-label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .button-label, .success h3, .success p'), {
   canAnimate: () => !still(),
   onActive: rowActive,
 });
@@ -95,6 +94,8 @@ const nameY = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
 styleEffect(wordmark, { x: nameX, y: nameY, '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(verseSurface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
+const verseLightX = springValue('0px', soft), verseLightY = springValue('0px', soft), verseGlow = springValue(0, { stiffness: 110, damping: 24 });
+styleEffect(verseText, { '--verse-x': verseLightX, '--verse-y': verseLightY, '--verse-glow': verseGlow });
 model.state.onFrame = () => {
   if (still()) { nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3); }
   else { nameX.set(-model.orbitNorm[0] * 6); nameY.set(-model.orbitNorm[1] * 3); }   // the springs smooth the lean (a jump per frame stepped it)
@@ -245,6 +246,7 @@ function visitPoint(clientX, clientY, input = 'mouse', target = null) {
   const lighting = (current?.dialog ?? wordmark).getBoundingClientRect();
   set(textLightX, `${clamp((clientX - lighting.left) / Math.max(1, lighting.width)) * 100}%`);
   set(textLightY, `${clamp((clientY - lighting.top) / Math.max(1, lighting.height)) * 100}%`);
+  if (input !== 'keyboard') lightVerse(clientX, clientY, verseNearness(clientX, clientY));
   const shell = anchor.getBoundingClientRect();
   const distance = Math.hypot(clientX - shell.left - shell.width / 2, clientY - shell.top - shell.height / 2);
   const proximity = clamp(1 - distance / (shell.height * 1.1)) * .6;
@@ -303,19 +305,27 @@ function ring(lon) {
 // word; a row-1 word lights its asset class and prints its own reading; a row-2 word tightens the lattice.
 // The verse is a control, but it answers in light alone: its hairline warms and the ember warms behind it,
 // a preview of where the verse panel will come from.
-function highlightVerse(state) {                     // 'rest' | 'lit' | 'press'
-  verseHover.forEach(control => control.stop());
-  const backgroundColor = { rest: '#3A4553', lit: '#FFE3B0', press: '#FFEBD0' }[state];
-  verseHover = [still() ? setImmediateMotion(verseRule, { backgroundColor })
-    : animate(verseRule, { backgroundColor }, { duration: state === 'press' ? .08 : .24, ease: 'easeOut' })];
+// The promise's blue visitor light: where the pointer is (px in the phrase) and how near it is (0 far .. 1 on the words).
+function lightVerse(clientX, clientY, near) {
+  const rect = verseText.getBoundingClientRect();
+  const instant = still();
+  const set = (value, next) => instant ? value.jump(next) : value.set(next);
+  set(verseLightX, `${(clientX - rect.left).toFixed(1)}px`); set(verseLightY, `${(clientY - rect.top).toFixed(1)}px`);
+  set(verseGlow, near);
 }
-function resetVerseFeedback() { highlightVerse(verseActive ? 'lit' : 'rest'); }
+function verseNearness(clientX, clientY) {
+  if (current) return 0;   // a panel is open over it
+  const rect = verseText.getBoundingClientRect();
+  const dx = Math.max(rect.left - clientX, 0, clientX - rect.right), dy = Math.max(rect.top - clientY, 0, clientY - rect.bottom);
+  const t = clamp(1 - Math.hypot(dx, dy) / 70);
+  return t * t * (3 - 2 * t);   // smoothstep: it brightens as the pointer approaches, fully on the words
+}
+function resetVerseFeedback() { if (!verseActive) verseGlow.jump(0); }
+function verseHoverChanged(active) {
+  verseActive = active;
+  if (!still() && entered && (active ? modalState === 'closed' : current?.name !== 'verse')) animate(uniforms, { u_warm: active ? .4 : 0 }, { duration: active ? .5 : .8, ease });
+}
 function rowActive(element, active) {
-  if (element.matches('.verse-button')) {
-    verseActive = active; highlightVerse(active ? 'lit' : 'rest');
-    if (!still() && entered && (active ? modalState === 'closed' : current?.name !== 'verse')) animate(uniforms, { u_warm: active ? .4 : 0 }, { duration: active ? .5 : .8, ease });
-    return;
-  }
   if (!element.matches('.service')) return;
   if (!active && still()) {   // always tear down; while still, set now and redraw instead of tweening
     animate(uniforms, element.dataset.row === '1' ? { u_classAmp: 0 } : { u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();
@@ -405,7 +415,9 @@ press('#open-contact, .send-button', element => {
   animate(element, { scale: .97 }, pressSpring);
   return () => animate(element, { scale: 1 }, pressSpring);
 });
-press(verseButton, () => { highlightVerse('press'); return () => highlightVerse(verseActive ? 'lit' : 'rest'); });   // text: light, never scale
+hover(verseButton, () => { verseHoverChanged(true); return () => verseHoverChanged(false); });   // the ember warms behind it, as before
+verseButton.addEventListener('focus', () => { const r = verseText.getBoundingClientRect(); lightVerse(r.left + r.width / 2, r.top + r.height / 2, 1); });
+verseButton.addEventListener('blur', () => { if (!verseActive) verseGlow.set(0); });
 
 function resetServiceMotion() {
   if (still()) textFeedback.reset(); else textFeedback.refresh();
