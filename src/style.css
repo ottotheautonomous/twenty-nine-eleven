@@ -13,6 +13,7 @@
 html { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body { margin: 0; min-width: 320px; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--ink);
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+dialog { -webkit-user-select: none; user-select: none; }   /* the browser's modal style turns selection back on in open panels */
 input, textarea, .email-address { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 html[data-renderer='static'] body { background: radial-gradient(42% 42% at 50% 30%, #15171C 0%, transparent 70%), var(--ink); }
 .world { position: fixed; top: 0; left: 0; right: 0; bottom: auto; display: block; width: 100%; height: 100vh; height: 100lvh; pointer-events: none; z-index: 0; }
