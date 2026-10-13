@@ -81,7 +81,7 @@ model.state.entered = entered;
 const labels = sentinel.labels;
 if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-button, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .modal-kicker, .field label, .button-label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-button, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .button-label, .success h3, .success p'), {
   canAnimate: () => !still(),
   onActive: rowActive,
 });

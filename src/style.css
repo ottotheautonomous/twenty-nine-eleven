@@ -114,7 +114,6 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .dialog-close:hover, .dialog-close:focus-visible { color: var(--dawn); background: #ffdfa810; }
 .dialog-content { padding: 39px 39px 28px; }
 .contact-heading { margin-bottom: 29px; }
-.modal-kicker { font: 400 10px/1.6 'IBM Plex Mono', monospace; letter-spacing: .16em; color: var(--dawn); opacity: .85; }
 h2 { font-size: 32px; line-height: 1.12; font-weight: 400; letter-spacing: -.03em; margin: 18px 0 15px; }
 .email-address { font: 400 11px/1.6 'IBM Plex Mono', monospace; color: var(--muted); margin: 0; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
