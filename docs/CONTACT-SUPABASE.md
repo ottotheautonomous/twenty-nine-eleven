@@ -5,6 +5,18 @@ code change on branch `contact-supabase`. The **owner** signs in and handles the
 owner present, from the root of a checkout of this repository. This repository is public, so it names no account address,
 computer or local file: those details live in the lead's untracked notes and the owner's password manager.
 
+## As deployed (2026-10-13)
+
+- Supabase project `Twenty Nine Eleven Contact Form` (US East), owner's organization. Migration applied with `psql` as
+  `postgres` through the session pooler (password from the owner's file via the environment, never an argument); `live_checks.sql`
+  rows 1-14 PASS; Security Advisor 0 ERROR / 0 WARN (two expected INFO `rls_enabled_no_policy`). Exposed schemas `public,
+  graphql_public`; Enforce SSL on; sign-ups and every Auth provider off; legacy `anon`/`service_role` keys **disabled**; the
+  legacy HS256 JWT signing key **revoked** (closes the round-3 finding that it could sign tokens), ES256 in use.
+- The Worker runs in the **ottotheautonomous** Cloudflare account on its `workers.dev` address (`account_id` in
+  `wrangler.jsonc`): the account that holds the `twentynineeleven.net` zone grants automation only "Administrator Read Only".
+  The page posts there through the repository variable `CONTACT_ENDPOINT`; its CSP follows automatically.
+- Turnstile: a Managed widget in the same account, hostnames `twentynineeleven.net` (covers `www`).
+
 ## What this builds
 
 The page's contact form already posts to the Cloudflare Worker at `https://contact.twentynineeleven.net/api/contact`. The
@@ -148,7 +160,7 @@ would refuse every visitor.
 
 1. **Before the merge: the widget and the site key** (owner). Cloudflare dashboard → **Turnstile → Add widget**: name
    `twenty nine eleven contact`; hostnames exactly those in `TURNSTILE_HOSTNAMES` in `wrangler.jsonc`; widget mode
-   **Invisible**. Put the **site key** (public) in the GitHub repository under **Settings → Secrets and variables → Actions →
+   **Managed** (Invisible needs Cloudflare's privacy addendum cited in a privacy policy, which the site does not have). Put the **site key** (public) in the GitHub repository under **Settings → Secrets and variables → Actions →
    Variables** as `TURNSTILE_SITE_KEY`. The widget's **secret key** goes only to the hidden prompt in step 3: not the password
    manager, a file or chat. If the dashboard no longer shows it by then, use the widget's **Settings → Rotate Secret Key** and
    paste the new one.
