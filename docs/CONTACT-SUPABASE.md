@@ -50,8 +50,13 @@ a chat (the lead's untracked notes list any known on this computer), do this bef
 
 1. Restrict the file at once (`chmod 600 <file>`), copy the value into a password-manager entry named "Supabase
    twenty-nine-eleven contact: database password", and remove the file (`shred -u <file>`).
+2. Then **reset the password**: restricting and deleting the copy stops future reads but does not undo the time it was
+   readable. Dashboard → Project Settings → Database (https://supabase.com/dashboard/project/_/database/settings) → Reset
+   database password → Generate, straight into the same password-manager entry (never a file or chat). (A project created
+   later, in section 3, starts with a freshly generated password, so there is nothing to reset.)
 
-The Worker never uses this password; only the optional CLI path (appendix A) might ask for it.
+The Worker never uses this password, so the reset changes nothing else; only the optional CLI path (appendix A) might ask
+for it.
 
 ## 2. Supabase account (owner)
 
@@ -180,11 +185,12 @@ Turnstile is on (section 8, required)**.
 5. **Advisors**: Security Advisor shows 0 ERROR and 0 WARN (section 4c, including any recorded owner acceptance).
 6. **Keep-alive**: after the next 03:17, 11:17 or 19:17 UTC, `select beat_at from intake.keepalive;` has moved, and the
    Worker's Cron Triggers page in the Cloudflare dashboard shows a successful run.
-7. **Account hygiene**, ticked by the owner: Supabase MFA on; organization = owner only; Enforce SSL on; network restrictions set
-   (or recorded as not offered on Free); the database password only in the password manager, no plain-text copy left; legacy JWT
-   keys disabled; Auth sign-ups off; exposed schemas = `public, graphql_public`; Cloudflare account MFA on; Wrangler logged out on
-   this computer; **Supabase Account → Access Tokens (https://supabase.com/dashboard/account/tokens) lists no token created for
-   this setup** (no `cli_…` token from a `supabase login`, no token from appendix A), and the checkout has no `supabase/.temp`.
+7. **Account hygiene**, ticked by the owner: Supabase MFA on; organization = owner only; Enforce SSL on; network restrictions
+   set (or recorded as not offered on Free); the database password only in the password manager, no plain-text copy left, and
+   reset after any plain-text exposure (section 1); legacy JWT keys disabled; Auth sign-ups off; exposed schemas =
+   `public, graphql_public`; Cloudflare account MFA on; Wrangler logged out on this computer; **Supabase Account → Access Tokens
+   (https://supabase.com/dashboard/account/tokens) lists no token created for this setup** (no `cli_…` token from a
+   `supabase login`, no token from appendix A), and the checkout has no `supabase/.temp`.
 8. Optional: delete the test row in the SQL Editor (`delete from intake.contact_submissions where id = <n>;`; only the owner
    can). Then add a dated line to `VALIDATION.md`: "live enquiry storage verified".
 

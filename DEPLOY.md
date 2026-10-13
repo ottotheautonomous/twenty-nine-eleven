@@ -9,7 +9,8 @@ remaining connection work; the full runbook, with every command, the lockdown ch
 
 The owner signs in; the lead runs the commands with the owner present (runbook sections 1-5):
 
-- Keep the database password only in a password manager: no copy in a plain file, note or chat.
+- Keep the database password only in a password manager: no copy in a plain file, note or chat. If a copy ever existed,
+  reset the password (runbook section 1).
 - Turn on MFA for the Supabase account; keep the organization to the owner.
 - Create a dedicated Free project. Data API exposed schemas stay `public, graphql_public` (never `intake`); Auth sign-ups off;
   Enforce SSL on; network restrictions if offered.
