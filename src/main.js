@@ -509,7 +509,7 @@ function setScenery(values) {
 function focusContact() {
   if (!success.hidden) success.focus({ preventScroll: true });
   else if (submitting) $('#close-contact').focus({ preventScroll: true });
-  else $('#name').focus({ preventScroll: true });
+  else $('#contact-title').focus({ preventScroll: true });   // the panel, not a field: no caret or phone keyboard until the visitor picks a field; Tab goes on to the name
 }
 
 // The verse: words take the light in reading order, arriving warm and cooling to their resting colour (CSS owns
@@ -555,7 +555,7 @@ function concealVerse() {
 const dialogs = {
   contact: {
     name: 'contact', dialog, surface, closeButton: $('#close-contact'), origin: trigger, initial: null,
-    items: () => dialog.querySelectorAll('.dialog-item'), focus: focusContact, sceneOpacity: .22, veilOpacity: .5,
+    items: () => dialog.querySelectorAll('.dialog-item'), focus: focusContact, sceneOpacity: .22, veilOpacity: .38,   // a lighter veil: the scene reads through the glass panel
     scenery: () => [
       animate(uniforms, { u_open: 1 }, { duration: .5, ease }),
       animate(uniforms, { u_dolly: 1 }, { duration: .7, ease }),

@@ -127,6 +127,14 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .dialog-surface { position: relative; max-height: min(740px, calc(100svh - 32px)); overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: #2c3b3a transparent; border: 1px solid #ffffff12; border-radius: 10px;
   background: radial-gradient(ellipse at var(--visitor-x) var(--visitor-y), #ffdfa80a 0, transparent 60%), linear-gradient(#0d1517f7, #090f11f7);
   box-shadow: 0 30px 90px #000a, inset 0 1px 0 #ffffff0a; }
+/* The contact panel is frosted glass: only its background lets the cage through (blurred), the text stays solid. Without
+   backdrop-filter it keeps the solid surface. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .contact-dialog .dialog-surface { background: radial-gradient(ellipse at var(--visitor-x) var(--visitor-y), #ffdfa80a 0, transparent 60%), linear-gradient(#0d15178c, #090f118c);   /* 55 %: the ember glows through */
+    -webkit-backdrop-filter: blur(16px) saturate(115%); backdrop-filter: blur(16px) saturate(115%); }
+  .contact-dialog .dialog-close { background: #0b1214b3; }
+}
+#contact-title:focus { outline: none; }   /* a programmatic landing spot for focus when the panel opens, not a control */
 .dialog-surface::before { content: ''; position: absolute; top: 0; left: 25%; right: 25%; height: 1px; background: linear-gradient(90deg, transparent, #ffdfa899, transparent); }
 .dialog-close { position: sticky; top: 14px; left: calc(100% - 58px); display: grid; place-items: center; z-index: 2; margin: 14px 14px -58px auto; height: 44px; width: 44px; border: 0; border-radius: 4px; background: #0b1214f0; color: var(--muted); }
 .dialog-close svg { height: 23px; width: 23px; stroke: currentColor; stroke-width: 1.2; fill: none; }
