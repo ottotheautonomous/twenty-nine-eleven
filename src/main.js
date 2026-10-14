@@ -505,18 +505,20 @@ const verseRef = $('.verse-ref');
 let verseFlash = null;
 function settleVerse() {
   setImmediateMotion([...verseWords, verseRef], { opacity: 1 });
+  textFeedback.pin(verseRef, true);   // the citation's underline, already in place
   verseWords.forEach(word => setImmediateMotion(word, { color: verseFinal.get(word) }));
 }
 function revealVerse(live) {
   if (!live) { settleVerse(); return; }
   const first = .7, step = .024, last = first + (verseWords.length - 1) * step;   // words start once the panel has landed (>= 99 %)
   setImmediateMotion([verseRef, ...verseWords], { opacity: 0 });
+  textFeedback.pin(verseRef, false);   // it draws in afresh with the reference
   verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: [word.closest('.verse-key') ? '#DCEFFF' : '#FFEBD0', verseFinal.get(word)] }, {
     delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
   })));
   // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
   modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .9, ease: [0.37, 0, 0.63, 1] }));   // the citation arrives softly
-  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 } }); }, last + .35);
+  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 }, keepLine: true }); }, last + .35);   // the underline draws out from the centre and stays
 }
 function concealVerse() {
   verseFlash?.(); verseFlash = null;
@@ -560,6 +562,7 @@ const dialogs = {
     onOpen() { if (!still()) { this.purpose = true; labels.setState('PURPOSE'); boost('u_boostGreet', .3, .9); } },   // the ember exhales as the panel leaves it
     reveal: revealVerse, settle: settleVerse, conceal: concealVerse,
     afterClose() {
+      textFeedback.pin(verseRef, false);                     // hidden now; the next opening draws it in again
       if (this.purpose) {                                    // a reset that ran behind the verse keeps its word
         this.purpose = false;
         const s = model.state;
