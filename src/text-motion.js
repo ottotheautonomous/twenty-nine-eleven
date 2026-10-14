@@ -80,9 +80,9 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       for (const label of record.labels) label.querySelectorAll('.motion-char').forEach(char => record.controls.push(immediate(char, { y: 0, color: active ? '#ffe9c4' : record.colors.get(label) })));
     }
     if (record.line) {
-      const lineOn = active || record.pinned;   // a pinned underline stays after the response releases (the verse citation)
+      const lineOn = active || record.pinned;   // a pinned underline (the verse citation) is drawn once and the pointer never changes it
       record.line.style.transformOrigin = record.origin;
-      const values = { scaleX: lineOn ? 1 : 0, opacity: active ? .9 : record.pinned ? .75 : 0 };
+      const values = record.pinned ? { scaleX: 1, opacity: .75 } : { scaleX: active ? 1 : 0, opacity: active ? .9 : 0 };
       const lineTiming = soft ? { duration: lineOn ? soft.in + soft.spread : soft.out + soft.spread, ease: [0.37, 0, 0.63, 1] } : { duration: lineOn ? .24 : .18, ease: [0.22, 1, 0.36, 1] };
       record.controls.push(spatial ? animate(record.line, values, lineTiming) : immediate(record.line, values));
     }

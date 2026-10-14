@@ -174,6 +174,9 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .verse-key { font-style: normal; color: var(--sky); }   /* the promise's own blue, as the footer's visitor light */
 .verse-cite { display: flex; justify-content: center; margin: 20px 0 0; font: 400 11px/1.6 'IBM Plex Mono', monospace; letter-spacing: .07em; color: var(--muted); }
 .verse-ref .service-light { background: linear-gradient(90deg, transparent, #FFEBD0 50%, transparent); }   /* fades out from the centre */
+/* The pointer's warm glow on the drawn underline: where the pointer is along it (--glow-x), as strong as it is near (--glow). Light only. */
+.verse-ref::after { content: ''; position: absolute; left: -30px; right: -30px; bottom: 0; height: 8px; pointer-events: none; opacity: var(--glow, 0);
+  background: radial-gradient(30px 4px at calc(var(--glow-x, 52px) + 30px) 50%, rgb(255 235 208 / .95), rgb(255 216 166 / .4) 50%, transparent 100%); filter: blur(.5px); }
 .verse-ref { position: relative; display: inline-flex; align-items: center; min-height: 26px; font-style: normal; color: var(--text-2); cursor: default; -webkit-user-select: none; user-select: none; }   /* the bullets' response: light wave + underline, nothing moves */
 .text-button { border: 0; border-bottom: 1px solid var(--rule); background: none; color: var(--silver); margin-top: 30px; padding: 10px 0; font-size: 12px; }
 .text-button span { margin-left: 20px; color: var(--dawn); }
