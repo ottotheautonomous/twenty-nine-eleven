@@ -104,6 +104,7 @@ uniform vec3 uProbeRaw, uHandDir, uHand; uniform float uWake;   // the hand: ins
 uniform vec3 uReset;         // the resync front (radius R, amp, band sigma): the tap's own light, as a ring leaving the ember
 uniform vec3 uEmberView;     // the ember, view space
 uniform vec3 uEmberLit;      // (reach sigma R, depth-split softness R, 3D falloff radius R)
+uniform vec2 uBead;          // the per-grain bead gain's range (lo, hi), eased with the grain count (webgl.js drawOpts)
 out float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk; out vec3 vToE;
 void main() {
   int w = textureSize(uHome, 0).x;
@@ -132,7 +133,11 @@ void main() {
   vec3 dp = p - uProbeRaw; float along = dot(dp, uHandDir);                  // the hand, measured across the view ray through the pointer
   float hk = 1.0 - smoothstep(0.0, 1.1 * uHand.x, length(dp - uHandDir * along)); hk *= hk * mix(1.0, uHand.y, smoothstep(-0.2, 0.2, along));
   float touch = uWake * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
-  vBoost = 1.0 + 1.5 * (ring + tap) + 0.5 * wave + sentry + touch;   // the resync ring crosses the dense limb: x0.5 keeps it to <= 3 bloom blocks (A3)
+  vBoost = 1.0 + 1.5 * (ring + tap) + 0.25 * wave + sentry + touch;   // the resync ring crosses the dense limb: x0.25 keeps the wider tube to <= 3 bloom blocks
+  // beads: a per-grain gain, skewed g^3 (mean 0.8 on every tier), so the wide 393k tube reads as a beaded ridge, not a soft band (a
+  // uniform 0.5-1.7 spread barely moved the bead contrast). 393k: 0.2-2.6; the 32-131k tiers (phones, uhd) take a milder 0.45-1.85, or
+  // their few bright grains stand apart as sand in a faint body. fract(r * 61.7): a second random
+  { float g = fract(r * 61.7); vBoost *= mix(uBead.x, uBead.y, g * g * g); }
   vGrow = grow;
   // The ember sits inside the cage. Only particles NEARER than it cover it (alpha = coverage, read by the ember pass), soft across
   // +-split so a scattered particle crossing its depth never pops. It is also a point light: vToE the direction to it; vEk its reach,
@@ -183,7 +188,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
   };
   const cfg = {
     fluidPush: 7e-4, shove: HAND.shove, drag: HAND.drag, swirl: 0.7e-4, swirlFreq: 7.0, spring: 1e-3, attract: 9e-4, friction: 0.9, speedLerp: 0.035, wrap: 0.18, bound: 2.5,
-    sizePx: 1.6, intensity: 0.026, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],
+    sizePx: 1.68, intensity: 0.030, fastRange: [0.003, 0.005], blurRange: [0.002, 0.007],   // grains +5 %; intensity (x the gain's mean 0.8, at 393k) lands the tube's peak on v1.3's
   };
   function tex(internal, type, data = null) {
     const t = gl.createTexture();
@@ -273,6 +278,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3fv(r.uEmberView, cam.emberView); gl.uniform3f(r.uEmberLit, EMBER_LIGHT.reach, EMBER_LIGHT.split, EMBER_LIGHT.falloff); gl.uniform1f(r.uEmberLight, EMBER_LIGHT.light);
     gl.uniform1f(r.uIntensity, opts.intensity); gl.uniform1f(r.uWrapR, cfg.wrap); gl.uniform1f(r.uEmberLevel, opts.emberLevel);
     gl.uniform1f(r.uEngage, u.u_engage.value); gl.uniform1f(r.uDim, u.u_dim.value);
+    { const bd = opts.bead || [0.2, 2.6]; gl.uniform2f(r.uBead, bd[0], bd[1]); }
     gl.uniform2fv(r.uFastRange, cfg.fastRange); gl.uniform2fv(r.uBlurRange, cfg.blurRange); gl.uniform2f(r.uInvRes, opts.invRes[0], opts.invRes[1]);
     // colour adds; alpha (the near-layer coverage the ember reads) accumulates as 1 - prod(1 - a): bounded in [0, 1], order-free,
     // so the ember's 5-tap blur is a real penumbra instead of a dilation of saturated sums

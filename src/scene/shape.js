@@ -1,4 +1,4 @@
-import { LATTICE, TUBE_JITTER, NODES } from './constants.js';
+import { LATTICE, TUBE_JITTER, NODE_JITTER, NODES } from './constants.js';
 
 // Great-circle normals (unit). Set 1 = the ten 3-fold axes of the icosahedron (sdf.glsl AX3), set 0 = the six 5-fold axes (AX5).
 export const AX3 = [[.57735027, .57735027, .57735027], [-.57735027, .57735027, .57735027], [.57735027, -.57735027, .57735027], [.57735027, .57735027, -.57735027],
@@ -22,7 +22,7 @@ export function tiltMatrix([ax, ay] = LATTICE.tilt) {
 
 // Homes in R2 low-discrepancy order: every prefix covers every circle evenly, which the governor's
 // "first N rows" trick and the 2k-sprite Canvas2D tier both rely on. xyz (world, tilted) + random in w.
-export function buildLattice(count, set = LATTICE.set, tilt = tiltMatrix()) {
+export function buildLattice(count, set = LATTICE.set, tilt = tiltMatrix(), jitter = TUBE_JITTER) {
   const normals = set === 1 ? AX3 : AX5, NC = normals.length;
   const frames = normals.map((n) => { const a = Math.abs(n[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]; const e1 = norm(cross(n, a)); return { n, e1, e2: cross(n, e1) }; });
   const homes = new Float32Array(count * 4);
@@ -30,7 +30,7 @@ export function buildLattice(count, set = LATTICE.set, tilt = tiltMatrix()) {
     const u = frac(0.5 + i * 0.7548776662466927), v = frac(0.5 + i * 0.5698402909980532);
     const { n, e1, e2 } = frames[Math.min(NC - 1, Math.floor(u * NC))];
     const th = v * Math.PI * 2, ct = Math.cos(th), st = Math.sin(th);
-    const rho = TUBE_JITTER * Math.sqrt(rand01(i * 3 + 1)), psi = rand01(i * 3 + 2) * Math.PI * 2;
+    const rho = jitter * Math.sqrt(rand01(i * 3 + 1)), psi = rand01(i * 3 + 2) * Math.PI * 2;
     const a = 1 + rho * Math.cos(psi), b = rho * Math.sin(psi);
     const pt = [e1[0] * ct + e2[0] * st, e1[1] * ct + e2[1] * st, e1[2] * ct + e2[2] * st];
     const p = tilt.apply([pt[0] * a + n[0] * b, pt[1] * a + n[1] * b, pt[2] * a + n[2] * b]);
@@ -111,6 +111,6 @@ export function pickNodes(homes, count = NODES, from = Math.min(4096, homes.leng
 export function createShape({ count, set = LATTICE.set }) {
   const tilt = tiltMatrix();
   const homes = buildLattice(count, set, tilt);
-  const { nodes, nodeClass, nodeText, anchors } = pickNodes(homes);
+  const { nodes, nodeClass, nodeText, anchors } = pickNodes(buildLattice(Math.min(4096, count), set, tilt, NODE_JITTER));   // the same R2 prefix at the readouts' radius (v1.3's), so the 64 nodes, their classes and anchors stay where the rows update put them
   return { homes, count, nodes, nodeClass, nodeText, anchors, rot: tilt.R, rotT: tilt.RT, set, shapeId: set === 1 ? 0 : 1 };
 }
