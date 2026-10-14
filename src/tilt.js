@@ -15,7 +15,8 @@ const unit = (v) => { const l = Math.sqrt(dot(v, v)) || 1; v[0] /= l; v[1] /= l;
 const screenAngle = () => (((Math.round((screen.orientation?.angle ?? window.orientation) / 90) % 4) + 4) % 4) * 90 || 0;
 
 export function createTilt(coarse = matchMedia('(pointer: coarse)')) {
-  const T = TILT, ios = typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+  // Ask only on Apple touch devices: Chrome (155) also has requestPermission, but its listeners need no ask (sensors allowed).
+  const T = TILT, ios = typeof window.DeviceOrientationEvent?.requestPermission === 'function' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
   let wanted = false, attached = false, granted = !ios, asked = false, beta = 0, gamma = 0, firstAt = -1, readings = 0;
   let seeded = false, lastAt = -1, lastAngle = -1, stillFor = 0, repose = false, easeFrom = 0, gain = 0;
   const d = [0, 0, -1], f = [0, 0, -1], p = [0, 0, -1], b = [0, 0, -1], out = [0, 0];   // reading, filtered (and last), neutral; target
