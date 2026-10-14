@@ -43,6 +43,8 @@ export const linearRGB = (hex) => hexRGB(hex).map(srgbToLinear);
 // (ember 0.08 R x lean, key light +0.35 x lean, haze 0.22 R x lean). Angles are degrees of gravity from a neutral that follows how
 // the device is held: it follows once the device has been still for `settle` s (settleTau), creeps while it moves (driftTau), and
 // catches up on a re-pose (> repose deg, until < reposeOut). lean = lean * tanh((t - dead * tanh(t / dead)) / soft).
-export const TILT = { on: true, askIOS: true,   // askIOS false: iOS is never asked (keeps the pointer-only page); on false: no tilt anywhere
+// askIOS false (the owner, 2026-10-14: no prompts): requestPermission is never called, so iOS keeps the pointer-only page; on
+// false: no tilt anywhere. ease: s, the smoothstep gain 0 -> 1 after every reseed, so tilt eases in and never switches on.
+export const TILT = { on: true, askIOS: false, ease: 1.5,
   lean: 1.5, soft: 16, dead: 1.5, still: 4, settle: 2.0, settleTau: 3.0, driftTau: 20, repose: 40, reposeOut: 2, reposeTau: 0.4,
   side: [0.80, 0.95], warm: 300, gap: 500 };   // side: |screen-x . gravity| fade (held sideways under rotation lock); warm/gap: ms

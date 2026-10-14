@@ -17,7 +17,7 @@ const screenAngle = () => (((Math.round((screen.orientation?.angle ?? window.ori
 export function createTilt(coarse = matchMedia('(pointer: coarse)')) {
   const T = TILT, ios = typeof window.DeviceOrientationEvent?.requestPermission === 'function';
   let wanted = false, attached = false, granted = !ios, asked = false, beta = 0, gamma = 0, firstAt = -1, readings = 0;
-  let seeded = false, lastAt = -1, lastAngle = -1, stillFor = 0, repose = false;
+  let seeded = false, lastAt = -1, lastAngle = -1, stillFor = 0, repose = false, easeFrom = 0, gain = 0;
   const d = [0, 0, -1], f = [0, 0, -1], p = [0, 0, -1], b = [0, 0, -1], out = [0, 0];   // reading, filtered (and last), neutral; target
   const onReading = (e) => {
     if (!Number.isFinite(e.beta) || !Number.isFinite(e.gamma)) return;
@@ -37,12 +37,12 @@ export function createTilt(coarse = matchMedia('(pointer: coarse)')) {
     const now = performance.now(), a = screenAngle(), dt = Math.min(dtMs, 100) / 1000, cb = Math.cos(beta * D);
     d[0] = Math.sin(gamma * D) * cb; d[1] = -Math.sin(beta * D); d[2] = -Math.cos(gamma * D) * cb;   // -(row 2 of Rz Rx Ry)
     // Reseed (target 0, the lean cascades untouched, so nothing jumps): the first step, the warm-up (some sensors open with a
-    // flat 0, 0, 0), a stopped loop (hidden tab, open panel, pause, a stall) and a rotation.
+    // flat 0, 0, 0), a stopped loop (hidden tab, open panel, pause, a stall) and a rotation. Each one restarts the ease-in gain.
     if (!seeded || now - firstAt < T.warm || now - lastAt > T.gap || a !== lastAngle) {
       for (let i = 0; i < 3; i++) f[i] = b[i] = d[i];
-      stillFor = 0; repose = false; seeded = true;
+      stillFor = 0; repose = false; seeded = true; easeFrom = now;
     }
-    lastAt = now; lastAngle = a;
+    lastAt = now; lastAngle = a; gain = smoothstep(0, T.ease * 1000, now - easeFrom);   // tilt eases in, never switches on
     // the pointer filter's lerp, then the neutral: re-pose (fast), settled (still for `settle` s) or moving (creeps)
     const k = damp(LAG.pointer, frameRatio(dtMs));
     for (let i = 0; i < 3; i++) { p[i] = f[i]; f[i] += (d[i] - f[i]) * k; }
@@ -64,7 +64,7 @@ export function createTilt(coarse = matchMedia('(pointer: coarse)')) {
     const tv = Math.atan2((s * b[2] * f[0] - c * b[2] * f[1] + (c * b[1] - s * b[0]) * f[2]) / hl, fb) / D;   // + top edge away
     const m = Math.hypot(th, tv);
     if (m < 1e-9) return out;
-    const L = T.lean * Math.tanh((m - T.dead * Math.tanh(m / T.dead)) / T.soft) * fade / m;   // soft dead zone, soft clamp, radial
+    const L = T.lean * Math.tanh((m - T.dead * Math.tanh(m / T.dead)) / T.soft) * fade * gain / m;   // soft dead zone, soft clamp, radial
     out[0] = th * L; out[1] = tv * L;
     return out;
   }
@@ -80,7 +80,7 @@ export function createTilt(coarse = matchMedia('(pointer: coarse)')) {
   };
   // window.__tne.tilt.state: development and test builds only (absent from production, like ?debug)
   if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1') {
-    Object.defineProperty(api, 'state', { get: () => ({ ios, attached, granted, asked, readings, beta, gamma, angle: lastAngle, target: [out[0], out[1]], stillFor, repose, seeded }) });
+    Object.defineProperty(api, 'state', { get: () => ({ ios, attached, granted, asked, readings, beta, gamma, angle: lastAngle, target: [out[0], out[1]], stillFor, repose, seeded, gain }) });
   }
   return api;
 }
