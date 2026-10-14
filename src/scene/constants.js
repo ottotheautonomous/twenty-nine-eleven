@@ -39,3 +39,10 @@ export const COLORS = { ink: '#06080B', haze: '#0E1219', slate: '#383E4E', shado
 export const hexRGB = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
 export const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 export const linearRGB = (hex) => hexRGB(hex).map(srgbToLinear);
+// Device tilt (src/tilt.js): on phones and tablets the ember leans downhill as the device tilts, through the pointer's own lean
+// (ember 0.08 R x lean, key light +0.35 x lean, haze 0.22 R x lean). Angles are degrees of gravity from a neutral that follows how
+// the device is held: it follows once the device has been still for `settle` s (settleTau), creeps while it moves (driftTau), and
+// catches up on a re-pose (> repose deg, until < reposeOut). lean = lean * tanh((t - dead * tanh(t / dead)) / soft).
+export const TILT = { on: true, askIOS: true,   // askIOS false: iOS is never asked (keeps the pointer-only page); on false: no tilt anywhere
+  lean: 1.5, soft: 16, dead: 1.5, still: 4, settle: 2.0, settleTau: 3.0, driftTau: 20, repose: 40, reposeOut: 2, reposeTau: 0.4,
+  side: [0.80, 0.95], warm: 300, gap: 500 };   // side: |screen-x . gravity| fade (held sideways under rotation lock); warm/gap: ms
