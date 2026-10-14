@@ -7,6 +7,7 @@ import { CLASS, ROW_READING } from './scene/shape.js';
 import { RESET } from './scene/constants.js';
 import { wrapWords } from './verse-light.js';
 import { turnstileEnabled, prepareTurnstile, turnstileToken } from './turnstile.js';
+import { createTilt } from './tilt.js';
 
 // Never run inside someone else's frame (clickjacking): a meta CSP cannot set frame-ancestors on GitHub Pages.
 if (window.top !== window.self) document.documentElement.style.display = 'none';
@@ -78,7 +79,10 @@ root.dataset.renderer = sentinel.type;
 const model = sentinel.model;
 model.state.entered = entered;
 const labels = sentinel.labels;
-if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose };
+// Device tilt leans the ember on phones and tablets (src/tilt.js); never on the static still.
+const tilt = createTilt();
+if (sentinel.type !== 'static') model.state.tilt = tilt;
+if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose, tilt };
 
 const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .success h3, .success p'), {
   canAnimate: () => !still(),
@@ -161,6 +165,7 @@ function updateAmbient() {
   model.state.modal = modalState !== 'closed';
   sentinel.allowSimulation(!still() && modalState === 'closed');
   sentinel.setActive(looping);
+  tilt.enable(!still() && !document.hidden && sentinel.type !== 'static');   // off: pause, reduced motion, ?still, hidden tab
   motionToggle.hidden = reducedMotion.matches || sentinel.type === 'static';
   motionToggle.setAttribute('aria-pressed', String(paused));
   $('#motion-icon').setAttribute('d', paused ? 'm7 5 7 5-7 5Z' : 'M7 5v10M13 5v10');
@@ -292,6 +297,15 @@ scene.addEventListener('pointerup', event => {
 function leaveScene() { pointerIntent = 0; setPointerElement(null); refreshIntent(); model.leave(); }
 scene.addEventListener('pointerleave', leaveScene);
 scene.addEventListener('pointercancel', leaveScene);
+// iOS asks for the device's orientation once per page load, at the end of the first touch that starts on the cage (tilt.ask
+// checks the rest). touchend is the gesture WebKit accepts for requestPermission; nothing is awaited before the call.
+let cageTouch = false;
+scene.addEventListener('touchstart', event => { cageTouch = event.touches.length === 1 && Boolean(event.target.closest('.mark-anchor')); }, { passive: true });
+scene.addEventListener('touchend', event => {
+  if (cageTouch && event.touches.length === 0 && entered && !still() && modalState === 'closed' && !event.target.closest('button, a, input, textarea, select, label')) tilt.ask();
+  cageTouch = false;
+}, { passive: true });
+scene.addEventListener('touchcancel', () => { cageTouch = false; }, { passive: true });
 // Motion keeps one value per animated uniform; a direct write to .value would be invisible to it, so every
 // gesture starts from explicit keyframes (a bare target would animate from Motion's last value, not the peak).
 function boost(key, peak, seconds) { animate(uniforms, { [key]: [peak, 0] }, { duration: seconds, ease: [0.2, 0.8, 0.2, 1] }); }
