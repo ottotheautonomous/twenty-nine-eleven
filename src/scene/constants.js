@@ -5,8 +5,9 @@ const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l
 export const R = 1;                                   // shell radius, world units
 export const FOV = 28 * DEG;                          // vertical; telephoto so it reads as an object
 export const KEY = norm([-0.6, 0.5, -0.6]);           // direction TO the key light: upper-left-behind
-export const LATTICE = { set: 1, tube: 0.02, tilt: [18 * DEG, 12 * DEG] };   // set 1 = 10 great circles; fallback set 0 (6)
-export const TUBE_JITTER = 0.014;                 // tighter strands: a tube of light, not a chalk line
+export const LATTICE = { set: 1, tube: 0.03, tilt: [18 * DEG, 12 * DEG] };   // set 1 = 10 great circles; fallback set 0 (6). tube: documentation only; sdf.glsl carries the value
+export const TUBE_JITTER = 0.0225;                // the strand's radius (R): a thicker tube of light; xe's 393k grains keep it dense and the per-grain gain (particles.js) keeps it beaded
+export const NODE_JITTER = 0.014;                 // the readout nodes are picked on v1.3's strand radius: the 64 nodes and their text do not move as the tube widens
 export const NODES = 64;
 // The hand: an instant shove + drag where the pointer moves, measured ACROSS the view ray through the raw pointer, so the
 // face under the hand feels it. radius in R (0.3 = 40 px at R 135); back: the far hemisphere's share (it stays coherent

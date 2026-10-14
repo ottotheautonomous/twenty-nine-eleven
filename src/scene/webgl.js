@@ -144,6 +144,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
       trail: trail.read.texture, time, invRes: [1 / W, 1 / H],
       sizeK: particles.cfg.sizePx * (rPx / 135) * cam.dist * (tier.mobile ? 1.15 : 1),
       intensity: particles.cfg.intensity * (gainS >= 0 ? gainS : countGain(count)),
+      bead: count >= 262144 ? [0.2, 2.6] : [0.45, 1.85],   // the beads' range (RENDER_VS): skewed at 393k, milder on the 32-131k tiers (same mean 0.8)
       emberLevel: emberLevel(uniforms, time), ...colors,
     };
   }

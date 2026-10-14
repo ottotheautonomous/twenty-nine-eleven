@@ -6,7 +6,8 @@ import { hexRGB, COLORS, NODES, LAG, HAND, RESET, EMBER_LIGHT } from './constant
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
 const TONES = [COLORS.shadow, COLORS.mid, COLORS.hi, COLORS.rim].map(hexRGB);
 TONES.push(TONES[2].map((c, i) => c + (hexRGB(COLORS.ember)[i] - c) * 0.45));   // 4: silver in the ember's light (hi toward ember: no new colour)
-const RADII = [2.0, 3.0, 4.0];                       // CSS px (v1's sizes, hard-cored); multiplied by the backing scale
+const RADII = [2.1, 3.4, 4.75];                      // CSS px (v1's 2/3/4, the large two grown: they carry the wider tube's width; the small one carries the beads); x the backing scale
+const BEAD = [0.62, 2.2];                            // per-sprite gain, skewed g^3 (mean 1.0; as RENDER_VS's beads): a few bright, crisp sprites in a dimmer body
 const BUCKETS = [0.05, 0.1, 0.18, 0.28, 0.38];         // globalAlpha per intensity bucket
 
 function makeSprite(r, rgb) {
@@ -15,7 +16,7 @@ function makeSprite(r, rgb) {
   const g = c.getContext('2d'), m = size / 2;
   const grad = g.createRadialGradient(m, m, 0, m, m, r);
   const [R, G, B] = rgb.map((x) => Math.round(x * 255));
-  grad.addColorStop(0, `rgba(${R},${G},${B},1)`); grad.addColorStop(0.35, `rgba(${R},${G},${B},0.85)`); grad.addColorStop(0.7, `rgba(${R},${G},${B},0.2)`); grad.addColorStop(1, `rgba(${R},${G},${B},0)`);   // hard core, short skirt
+  grad.addColorStop(0, `rgba(${R},${G},${B},1)`); grad.addColorStop(0.35, `rgba(${R},${G},${B},0.85)`); grad.addColorStop(0.7, `rgba(${R},${G},${B},0.18)`); grad.addColorStop(1, `rgba(${R},${G},${B},0)`);   // hard core, short skirt
   g.fillStyle = grad; g.fillRect(0, 0, size, size);
   return c;
 }
@@ -198,7 +199,8 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
-      inten[i] = 0.95 * dens * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch) * (1 + 0.5 * head);
+      const bead = BEAD[0] + (BEAD[1] - BEAD[0]) * ((r * 61.7) % 1) ** 3;   // fixed for life (the same second random as GL's beads)
+      inten[i] = 0.86 * dens * bead * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch) * (1 + 0.5 * head);
       // the ember inside the cage (as RENDER_FS): a sprite behind it shows its lit face and takes its tone; one in front catches a
       // quarter (its rim) and veils the source
       const vxp = view4[0] * px + view4[4] * py + view4[8] * pz + view4[12] - EV[0], vyp = view4[1] * px + view4[5] * py + view4[9] * pz + view4[13] - EV[1];

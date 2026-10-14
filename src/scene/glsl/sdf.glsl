@@ -58,8 +58,8 @@ uniform mat3 uLatticeRotT;          // transpose of shape.js's tilt matrix: worl
 uniform int uShape;                 // 0 (default) or 1 (fallback)
 float sdfShape(int id, vec3 p) {
   vec3 q = uLatticeRotT * p;
-  if (id == 1) return sdGeodesic(q, 1.0, 0.02, 0);
-  return sdGeodesic(q, 1.0, 0.02, 1);
+  if (id == 1) return sdGeodesic(q, 1.0, 0.03, 0);   // = LATTICE.tube (constants.js) = TUBE_JITTER x 4/3
+  return sdGeodesic(q, 1.0, 0.03, 1);
 }
 float sdfScene(vec3 p) { return sdfShape(uShape, p); }
 
