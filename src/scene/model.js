@@ -4,6 +4,7 @@ import { createCameraState, computeCamera, screenToWorldOnCentrePlane } from './
 import { FINDING } from './shape.js';
 import { LAG, EXPOSURE, ORBIT, TIMING, INTEGRITY, RESET, TEAR, NODES } from './constants.js';
 const inOut3 = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const ZERO2 = [0, 0];
 
 // The interaction model: GL-free and authoritative for everything the DOM shows. Both renderers read it.
 // Chain of lags (each response lands on its own beat): smoothed pointer 0.33 s -> lag velocity 0.83 s ->
@@ -113,6 +114,7 @@ export function createModel(shape, uniforms) {
     // the integrity ledger and the reset (see INTEGRITY / RESET)
     quietSince: -1e9, damage: 0, deficit: 0, pressOnly: false, resetting: false, released: false, rollUntil: 0, resetT: -1, front: -10, resetAmp: 0, ampS: 0,
   };
+  s.tilt = null;   // main.js: the device-tilt input (src/tilt.js). It feeds the lean in step 3 and nothing else.
   const eyeDir = [0, 0, -1], tmp3 = [0, 0, 0];
 
   function publish() {
@@ -171,7 +173,8 @@ export function createModel(shape, uniforms) {
     const t = s.time, shake = motion * ORBIT.shake, drift = motion * u.u_idle.value * ORBIT.idle;
     s.yaw = oy + shake * (Math.sin(0.5 * t) + Math.sin(1.3 * t + 1.7) + Math.sin(2.1 * t + 0.4)) / 3 + drift * Math.sin(2 * Math.PI * t / 11);
     s.pitch = op + shake * 0.6 * (Math.sin(0.45 * t + 2.2) + Math.sin(1.1 * t + 0.9) + Math.sin(1.9 * t + 3.1)) / 3 + drift * 0.6 * Math.cos(2 * Math.PI * t / 17);
-    const leanAim = aimed ? s.probeS : [0, 0];
+    const tilt = s.tilt && motion && s.entered ? s.tilt.step(dtMs) : null;   // stepped under a finger too, so its neutral keeps up
+    const leanAim = aimed ? s.probeS : tilt && !s.modal ? tilt : ZERO2;     // a finger, pointer or focus wins; a panel sends it home
     lean[0].step(clamp(leanAim[0], -1.5, 1.5), ratio); lean[1].step(clamp(leanAim[1], -1.5, 1.5), ratio);
     // 4. camera for this frame
     computeCamera(cam, u, view, { yaw: s.yaw, pitch: s.pitch }, [lean[0].value, lean[1].value]);
