@@ -30,7 +30,7 @@ export function createTilt(coarse = matchMedia('(pointer: coarse)')) {
     if (on === attached) return;
     attached = on;
     if (on) addEventListener('deviceorientation', onReading);
-    else { removeEventListener('deviceorientation', onReading); firstAt = -1; seeded = false; out[0] = out[1] = 0; }
+    else { removeEventListener('deviceorientation', onReading); firstAt = -1; seeded = false; gain = out[0] = out[1] = 0; }
   }
   function step(dtMs) {
     if (!(dtMs > 0)) return attached ? out : null;             // a redraw without time (drawOnce): no state change
