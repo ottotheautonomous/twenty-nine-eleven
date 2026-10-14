@@ -94,6 +94,9 @@ const nameY = springValue(0, { stiffness: 60, damping: 18, mass: 1.2 });
 styleEffect(wordmark, { x: nameX, y: nameY, '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(surface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
 styleEffect(verseSurface, { '--visitor-x': textLightX, '--visitor-y': textLightY });
+// The verse citation's underline, once drawn, glows where the pointer is along it, brighter the nearer it comes (light only).
+const citeGlowX = springValue('52px', soft);   // px along the citation (its glow box reaches 30 px past each end)
+const citeGlow = springValue(0, soft);
 const verseLightX = springValue('0px', soft), verseLightY = springValue('0px', soft), verseGlow = springValue(0, { stiffness: 110, damping: 24 });
 styleEffect(verseText, { '--verse-x': verseLightX, '--verse-y': verseLightY, '--verse-glow': verseGlow });
 model.state.onFrame = () => {
@@ -502,21 +505,33 @@ const verseBody = $('#verse-body');
 const verseWords = wrapWords(verseBody.querySelector('p'));
 const verseFinal = new Map(verseWords.map(word => [word, getComputedStyle(word).color]));
 const verseRef = $('.verse-ref');
-let verseFlash = null;
+styleEffect(verseRef, { '--glow-x': citeGlowX, '--glow': citeGlow });
+let verseFlash = null, verseLined = false;   // verseLined: the underline is drawn (from its entrance until the panel has closed)
+function lightCitation(clientX, clientY) {
+  if (!verseLined || still()) { citeGlow.jump(0); return; }
+  const rect = verseRef.getBoundingClientRect(), y = rect.bottom - 3.5;   // the underline sits 3 px above the citation's bottom
+  const dx = Math.max(rect.left - clientX, 0, clientX - rect.right), dy = Math.abs(clientY - y);
+  const t = clamp(1 - Math.hypot(dx, dy) / 120);
+  citeGlowX.set(`${(clamp((clientX - rect.left) / Math.max(1, rect.width)) * rect.width).toFixed(1)}px`);
+  citeGlow.set(t * t * (3 - 2 * t));   // smoothstep: it brightens as the pointer approaches, fully on the line
+}
+function dimCitation() { citeGlow.set(0); }
 function settleVerse() {
   setImmediateMotion([...verseWords, verseRef], { opacity: 1 });
+  textFeedback.pin(verseRef, true); verseLined = true;   // the citation's underline, already in place
   verseWords.forEach(word => setImmediateMotion(word, { color: verseFinal.get(word) }));
 }
 function revealVerse(live) {
   if (!live) { settleVerse(); return; }
   const first = .7, step = .024, last = first + (verseWords.length - 1) * step;   // words start once the panel has landed (>= 99 %)
   setImmediateMotion([verseRef, ...verseWords], { opacity: 0 });
+  textFeedback.pin(verseRef, false); verseLined = false; citeGlow.jump(0);   // it draws in afresh with the reference
   verseWords.forEach((word, i) => modalAnimations.push(animate(word, { opacity: [0, 1], color: [word.closest('.verse-key') ? '#DCEFFF' : '#FFEBD0', verseFinal.get(word)] }, {
     delay: first + i * step, ease: 'easeOut', opacity: { duration: .35 }, color: { duration: .7 },
   })));
   // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
   modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .9, ease: [0.37, 0, 0.63, 1] }));   // the citation arrives softly
-  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 } }); }, last + .35);
+  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') { textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 }, keepLine: true }); verseLined = true; } }, last + .35);   // the underline draws out from the centre and stays
 }
 function concealVerse() {
   verseFlash?.(); verseFlash = null;
@@ -560,6 +575,7 @@ const dialogs = {
     onOpen() { if (!still()) { this.purpose = true; labels.setState('PURPOSE'); boost('u_boostGreet', .3, .9); } },   // the ember exhales as the panel leaves it
     reveal: revealVerse, settle: settleVerse, conceal: concealVerse,
     afterClose() {
+      textFeedback.pin(verseRef, false); verseLined = false; citeGlow.jump(0);   // hidden now; the next opening draws it in again
       if (this.purpose) {                                    // a reset that ran behind the verse keeps its word
         this.purpose = false;
         const s = model.state;
@@ -650,7 +666,12 @@ function wireDialog(d) {
   d.dialog.addEventListener('pointerup', event => { if (backdropDown && event.target === d.dialog && outsidePanel(event)) closeDialog(d); backdropDown = false; });
   d.dialog.addEventListener('pointermove', event => {
     if (d.dialog.open) visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse');
+    if (d.name === 'verse' && d.dialog.open) lightCitation(event.clientX, event.clientY);
   }, { passive: true });
+  if (d.name === 'verse') {   // the glow goes when the pointer leaves the window or a finger lifts
+    d.dialog.addEventListener('pointerout', event => { if (!event.relatedTarget) dimCitation(); }, { passive: true });
+    d.dialog.addEventListener('pointerup', event => { if (event.pointerType !== 'mouse') dimCitation(); }, { passive: true });
+  }
 }
 Object.values(dialogs).forEach(wireDialog);
 trigger.addEventListener('click', () => openContact(trigger));

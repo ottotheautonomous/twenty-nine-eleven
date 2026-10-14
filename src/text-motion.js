@@ -80,9 +80,10 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       for (const label of record.labels) label.querySelectorAll('.motion-char').forEach(char => record.controls.push(immediate(char, { y: 0, color: active ? '#ffe9c4' : record.colors.get(label) })));
     }
     if (record.line) {
+      const lineOn = active || record.pinned;   // a pinned underline (the verse citation) is drawn once and the pointer never changes it
       record.line.style.transformOrigin = record.origin;
-      const values = { scaleX: active ? 1 : 0, opacity: active ? .9 : 0 };
-      const lineTiming = soft ? { duration: active ? soft.in + soft.spread : soft.out + soft.spread, ease: [0.37, 0, 0.63, 1] } : { duration: active ? .24 : .18, ease: [0.22, 1, 0.36, 1] };
+      const values = record.pinned ? { scaleX: 1, opacity: .75 } : { scaleX: active ? 1 : 0, opacity: active ? .9 : 0 };
+      const lineTiming = soft ? { duration: lineOn ? soft.in + soft.spread : soft.out + soft.spread, ease: [0.37, 0, 0.63, 1] } : { duration: lineOn ? .24 : .18, ease: [0.22, 1, 0.36, 1] };
       record.controls.push(spatial ? animate(record.line, values, lineTiming) : immediate(record.line, values));
     }
     record.dots.forEach(dot => updateSeparator(dot, record.element, active, !spatial));
@@ -109,7 +110,7 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       }
     }
     const line = element.matches('.service, [data-motion-line]') ? document.createElement('span') : null;   // the bullets' underline
-    const record = { element, color, canonical, labels: [], colors: new Map(), chars: [], line, dots: [], origin: '50% 50%', controls: [], hover: false, focus: false, touch: false, active: false, timer: 0 };
+    const record = { element, color, canonical, labels: [], colors: new Map(), chars: [], line, dots: [], origin: '50% 50%', controls: [], hover: false, focus: false, touch: false, active: false, pinned: false, timer: 0 };
     makeInk(record);
     if (line) { line.className = 'service-light'; line.setAttribute('aria-hidden', 'true'); element.appendChild(line); }
     records.set(element, record);
@@ -148,15 +149,23 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     },
     // the hover response played once (light wave, underline), e.g. as an element is revealed; nothing moves
     // soft: { in, out, spread } seconds: a slow swell and a slower release instead of the hover's quick snap
-    flash(element, ms = 900, { soft = null } = {}) {
+    // keepLine: the underline draws out from the centre with the flash and stays once the letters release (unpin with pin(el, false))
+    flash(element, ms = 900, { soft = null, keepLine = false } = {}) {
       const record = records.get(element);
       if (!record || !canAnimate()) return;
       clearTimeout(record.flashTimer); clearTimeout(record.softTimer);
+      if (keepLine) { record.pinned = true; record.origin = '50% 50%'; }
       record.soft = soft; set(record, 'touch', true);
       record.flashTimer = setTimeout(() => {
         set(record, 'touch', false);
         record.softTimer = setTimeout(() => { record.soft = null; }, soft ? (soft.out + soft.spread) * 1000 : 0);   // hovers afterwards answer at their usual pace
       }, ms);
+    },
+    // the underline alone, at once (no motion): shown under still / reduced motion, cleared while its panel is hidden
+    pin(element, on) {
+      const record = records.get(element);
+      if (!record || record.pinned === on) return;
+      record.pinned = on; record.origin = '50% 50%'; render(record, true);
     },
     reset() { records.forEach(record => render(record, true)); },
     refresh() { records.forEach(record => render(record, !canAnimate())); },
