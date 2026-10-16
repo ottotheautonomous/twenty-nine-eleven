@@ -1,5 +1,5 @@
 import './style.css';
-import { animate, stagger, hover, press, springValue, styleEffect, delay } from 'motion';
+import { animate, stagger, hover, press, springValue, styleEffect, delay, frame, cancelFrame, motionValue, cubicBezier } from 'motion';
 import { createSentinel } from './scene/sentinel.js';
 import { createTextMotion } from './text-motion.js';
 import { uniforms, engage, idle, settled } from './scene-state.js';
@@ -8,6 +8,9 @@ import { RESET } from './scene/constants.js';
 import { wrapWords } from './verse-light.js';
 import { turnstileEnabled, prepareTurnstile, turnstileToken } from './turnstile.js';
 import { createTilt } from './tilt.js';
+import { createTouchSelect } from './touch.js';
+import { createSparkle } from './sparkle.js';
+import { createLiving, parseLiving } from './living.js';
 
 // Never run inside someone else's frame (clickjacking): a meta CSP cannot set frame-ancestors on GitHub Pages.
 if (window.top !== window.self) document.documentElement.style.display = 'none';
@@ -43,6 +46,7 @@ const success = $('#success');
 const buttonLabel = $('.button-label');
 const endpoint = import.meta.env.VITE_CONTACT_ENDPOINT || 'https://twenty-nine-eleven-contact.twentynineeleven.workers.dev/api/contact';
 const ease = [0.22, 1, 0.36, 1];
+const easeBack = [0.64, 0, 0.78, 0];   // ease mirrored: a touch's snap exit plays its entrance in reverse
 const entrance = [];
 let successAnimations = [];
 let modalAnimations = [];
@@ -66,7 +70,17 @@ let lastDrawnEngage = 0;
 let current = null;            // the open dialog's descriptor (one modal at a time)
 let verseActive = false;
 let restoring = false;         // the instrument reads RESTORING from the reset's start until it seals or aborts
+const contactSources = { hover: false, focus: false, press: false, slide: false };   // what holds the trigger's peak (arrow drawn, strand formed)
+let hoverHeld = false;         // a panel opened under a hovering pointer: that hover counts again once the pointer moves
 const still = () => reducedMotion.matches || paused || params.has('still');
+
+// Living layer & row-2 cage signatures (LIVING-SPEC): active by default (all,verbs); configurable via ?living=<flags> or ?living=0.
+const livingRaw = params.get('living') ?? 'all,verbs';
+const livingTokens = new Set(livingRaw.split(/[,\s]+/).filter(Boolean));
+const verbsOn = !livingTokens.has('0') && livingTokens.has('verbs');
+let lastPointerType = 'mouse';
+document.addEventListener('pointerdown', event => { lastPointerType = event.pointerType || 'mouse'; }, { capture: true, passive: true });
+document.addEventListener('pointermove', event => { lastPointerType = event.pointerType || 'mouse'; }, { capture: true, passive: true });
 
 // Lift the CSS entrance gate without a flash: targets start transparent inline.
 const entering = [canvas, instrument, ...words, ...document.querySelectorAll('[data-enter], .services li'), motionToggle];
@@ -74,19 +88,30 @@ if (!still()) entering.forEach(element => { element.style.opacity = '0'; });
 root.classList.add('entered');
 
 // Sentinel: a geodesic perimeter of light around one warm ember; the visitor's cursor is the probe.
-const sentinel = createSentinel(canvas, anchor, uniforms, { debug: Math.max(0, debug), readout: debug >= 0, readouts: $('.readouts'), instrument });
+const sentinel = createSentinel(canvas, anchor, uniforms, { debug: Math.max(0, debug), readout: debug >= 0, readouts: $('.readouts'), instrument, verbs: { on: verbsOn, spill: livingTokens.has('spill') } });
 root.dataset.renderer = sentinel.type;
 const model = sentinel.model;
 model.state.entered = entered;
 const labels = sentinel.labels;
-// Device tilt leans the ember on phones and tablets (src/tilt.js); never on the static still.
-const tilt = createTilt();
+// Device tilt leans the ember on phones and tablets (src/tilt.js); never on the static still. ?tiltsim (test builds only, like
+// ?debug) treats a desktop as a touch device and fakes its sensor with a pad (src/tiltsim.js).
+const tiltSim = debugHooks && params.has('tiltsim');
+const tilt = createTilt(tiltSim ? { matches: true } : undefined);
 if (sentinel.type !== 'static') model.state.tilt = tilt;
-if (debug >= 0) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose, tilt };
+if (tiltSim) import('./tiltsim.js').then(sim => { window.__tiltsim = sim.mountTiltSim(); });
+// The trigger catches the dust: grains condense around "Start a conversation" as the pointer comes near (src/sparkle.js).
+const sparkle = createSparkle({ shell: $('.contact-trigger-shell'), trigger, label: $('.contact-trigger > span:first-child'), anchor, rows: $('.services-secondary'),
+  verse: verseText, sentinel, frame, cancelFrame, animate, motionValue, cubicBezier });
+// The living layer: presence lamp, tap drop, click blink, underline swell, light exits (src/living.js).
+const livingFlags = parseLiving(livingRaw);
+const living = livingFlags ? createLiving({ flags: livingFlags, scene, anchor, sentinel, gainK: debugHooks ? Number(params.get('livinggain')) || 1 : 1 }) : null;
+if (living) root.dataset.living = [...livingFlags].join(' ');
+if (debug >= 0 || (debugHooks && (living || verbsOn))) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose, tilt, sparkle: sparkle.debug, living };
 
 const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .success h3, .success p'), {
   canAnimate: () => !still(),
-  onActive: rowActive,
+  onActive: (element, active, event, pace) => { rowActive(element, active, event, pace); living?.lineActive(element, active); },
+  ownsTouch: element => scene.contains(element),   // src/touch.js drives the scene's touch responses
 });
 // The wordmark parallaxes opposite the camera, written from the same orbit cascade so the layers move as one rig.
 // The visitor light is scoped to the wordmark and the dialog: on :root it forced a document-wide style recalc per frame.
@@ -150,9 +175,9 @@ function measureName() {
     word.style.setProperty('--word-y', y);
   }
 }
-function measure() { sentinel.measure(); measureName(); }
+function measure() { sentinel.measure(); measureName(); sparkle.measure(); living?.measure(); }
 let resizeTimer = 0;
-window.addEventListener('resize', () => { measureName(); sentinel.measure(); textFeedback.refresh(); clearTimeout(resizeTimer); resizeTimer = setTimeout(() => sentinel.resize(), 120); }, { passive: true });
+window.addEventListener('resize', () => { measureName(); sentinel.measure(); sparkle.measure(); living?.measure(); textFeedback.refresh(); clearTimeout(resizeTimer); resizeTimer = setTimeout(() => sentinel.resize(), 120); }, { passive: true });
 window.addEventListener('scroll', () => sentinel.measure(), { passive: true });
 new ResizeObserver(measure).observe(stage);
 document.fonts.ready.then(measure);
@@ -168,10 +193,22 @@ function updateAmbient() {
   model.state.modal = modalState !== 'closed';
   sentinel.allowSimulation(!still() && modalState === 'closed');
   sentinel.setActive(looping);
+  livingPolicy();
   tilt.enable(!still() && !document.hidden && sentinel.type !== 'static');   // off: pause, reduced motion, ?still, hidden tab
   motionToggle.hidden = reducedMotion.matches || sentinel.type === 'static';
   motionToggle.setAttribute('aria-pressed', String(paused));
   $('#motion-icon').setAttribute('d', paused ? 'm7 5 7 5-7 5Z' : 'M7 5v10M13 5v10');
+  syncSparkle();
+}
+function livingPolicy() {
+  living?.policy({ run: entered && !still() && !document.hidden && modalState === 'closed' && sentinel.type !== 'static', lines: !still() && !document.hidden, instant: still() || document.hidden });
+}
+// The dust runs only on the settled, moving, visible page with no panel open (and never on the static still); a still, the pause
+// toggle and a hidden tab clear it at once, a panel retires it as its arrival reversed. A panel also holds a hovering pointer's peak.
+function syncSparkle() {
+  const open = modalState !== 'closed';
+  if (open && !hoverHeld) { hoverHeld = true; contactSources.press = contactSources.slide = false; setContactHover(contactSources.hover, 'hover'); }
+  sparkle.policy({ run: entered && !still() && !document.hidden && !open && sentinel.type !== 'static', instant: still() || document.hidden });
 }
 function applyMotionPolicy() {
   uniforms.u_motion.value = still() ? 0 : 1;
@@ -181,7 +218,8 @@ function applyMotionPolicy() {
     if (restoring) { restoring = false; if (current?.name !== 'verse') labels.setState(model.state.state); }   // still: the ledger is cleared, so is the word (the verse keeps PURPOSE)
     const t0 = model.state.tier0; if (t0.on) { t0.on = false; t0.since = -1; }
     animate(uniforms, current?.name === 'verse' ? { u_tier0: 0, u_classAmp: 0 } : { u_tier0: 0, u_classAmp: 0, u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();   // the open verse owns warm/tight
-    model.rowHover(-1); rowIntent = 0;
+    model.rowHover(-1); rowIntent = 0; touch.cancel('still');
+    model.verbs?.clear(); verbGates.forEach(clearTimeout); verbGates.clear(); verbLinger.forEach(clearTimeout); verbLinger.clear();
   }
   updateAmbient(); refreshIntent(); resetServiceMotion(); sentinel.drawOnce();
 }
@@ -202,7 +240,7 @@ idle.on('change', value => {
   if (value > 0.999 && !sentryTimer && !still() && modalState === 'closed') { sentryPass(); sentryTimer = setInterval(sentryPass, 9000); }
   else if (value < 0.999 && sentryTimer) stopSentry();
 });
-document.addEventListener('keydown', noteActivity);
+document.addEventListener('keydown', () => { noteActivity(); living?.activity(); });
 
 // Entrance: the ember ignites alone in the dark, the perimeter builds inward around it behind a noise-perturbed
 // front, then the name rises from the centre. The corner instrument decodes last and integrity counts in.
@@ -233,7 +271,7 @@ if (still()) {
     labels.decodeInstrument();
     labels.countIn(.998).then(() => { integrityLive = true; });
   }, 2.3);
-  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; model.state.entered = true; if (model.state.inScene) model.enter(); armIdle(); });
+  Promise.all(entrance.map(control => control.finished)).then(() => { entered = true; model.state.entered = true; if (model.state.inScene) model.enter(); armIdle(); livingPolicy(); syncSparkle(); });
 }
 sentinel.enableSimulationAt(1.9);
 uniforms.u_motion.value = still() ? 0 : 1;
@@ -266,6 +304,10 @@ function visitPoint(clientX, clientY, input = 'mouse', target = null) {
 
 scene.addEventListener('pointermove', event => {
   if (modalState !== 'closed') return;
+  sparkle.pointer(event.clientX, event.clientY, event.pointerType || 'mouse');
+  if (hoverHeld) { hoverHeld = false; setContactHover(contactSources.hover, 'hover'); }   // a hover held under a panel counts again once the pointer moves
+  living?.pointer(event.clientX, event.clientY, event.pointerType || 'mouse');
+  if (event.pointerType === 'touch') { touch.move(event); return; }   // a sliding finger: src/touch.js, then touchPoint (the same feed)
   const target = event.target.closest('[data-react]');
   setPointerElement(target);
   visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse', target);
@@ -278,6 +320,9 @@ scene.addEventListener('pointermove', event => {
 let down = null;
 scene.addEventListener('pointerdown', event => {
   if (modalState !== 'closed') return;
+  if (event.pointerType) sparkle.pointer(event.clientX, event.clientY, event.pointerType);   // not Motion's keyboard press (a synthetic event at 0, 0)
+  living?.down(event.clientX, event.clientY, event.pointerType || 'mouse', event.target, event.pointerId);
+  if (event.pointerType === 'touch' && !touch.down(event)) { down = null; return; }   // a second finger: a pinch, never a tap
   const target = event.target.closest('[data-react]');
   setPointerElement(target);
   visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse', target);
@@ -287,7 +332,14 @@ scene.addEventListener('pointerdown', event => {
   model.pointer(nx, ny, event.timeStamp);
 }, { passive: true });
 scene.addEventListener('pointerup', event => {
-  if (down && down.touch && !still() && event.timeStamp - down.t < 250 && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 8) {
+  if (event.pointerType === 'touch' && !event.isPrimary) {
+    living?.up(event.clientX, event.clientY, 'touch', { tap: false, target: event.target, id: event.pointerId });
+    touch.up(event); return;
+  }
+  const tap = Boolean(down && down.touch && !still() && event.timeStamp - down.t < 250 && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 8);
+  const rowTap = tap && (living?.flags.has('drop') || verbsOn) && event.target.closest('.service');
+  living?.up(event.clientX, event.clientY, event.pointerType || 'mouse', { tap, target: event.target, id: event.pointerId });
+  if (tap && !rowTap) {
     // Tap: a wave from the finger across the cage and the three nearest readings for 1.5 s.
     const [nx, ny] = toNdc(event.clientX, event.clientY);
     const p = model.tap(nx, ny);
@@ -295,9 +347,23 @@ scene.addEventListener('pointerup', event => {
     animate(uniforms, { u_tapT: [0, 1] }, { duration: .9, ease: [0.16, 1, 0.3, 1] });
   }
   down = null;
-  if (event.pointerType === 'touch') leaveScene();
+  if (event.pointerType === 'touch') { sparkle.leave(); touch.up(event); }   // the hand leaves; a held selection lingers (src/touch.js)
 }, { passive: true });
-function leaveScene() { pointerIntent = 0; setPointerElement(null); refreshIntent(); model.leave(); }
+function leaveHand() {
+  pointerIntent = 0; setPointerElement(null); refreshIntent(); model.leave();
+  if (living?.flags.has('exits')) {   // L0: the promise's blue light and the wordmark light leave with the pointer (their own springs)
+    if (still()) { verseGlow.jump(0); textLightX.jump('50%'); textLightY.jump('45%'); } else { verseGlow.set(0); textLightX.set('50%'); textLightY.set('45%'); }
+  }
+}
+function leaveScene(event) {
+  if (event?.pointerType === 'touch') {
+    if (event.type === 'pointercancel') { sparkle.leave(); living?.cancel(event.pointerId); touch.cancel('cancel', event); }
+    return;
+  }
+  sparkle.leave();
+  living?.leave(event?.pointerType || 'mouse');
+  leaveHand();
+}
 scene.addEventListener('pointerleave', leaveScene);
 scene.addEventListener('pointercancel', leaveScene);
 // iOS asks for the device's orientation once per page load, at the end of the first touch that starts on the cage (tilt.ask
@@ -319,7 +385,7 @@ function ring(lon) {
 }
 
 // The rows are plain text, but their hover is felt in the scene: a dotted packet runs the meridian above the
-// word; a row-1 word lights its asset class and prints its own reading; a row-2 word tightens the lattice.
+// word; a row-1 word lights its asset class and prints its own reading; a row-2 word answers with its cage verb signature.
 // The verse is a control, but it answers in light alone: its hairline warms and the ember warms behind it,
 // a preview of where the verse panel will come from.
 // The promise's blue visitor light: where the pointer is (px in the phrase) and how near it is (0 far .. 1 on the words).
@@ -338,12 +404,42 @@ function verseNearness(clientX, clientY) {
   return t * t * (3 - 2 * t);   // smoothstep: it brightens as the pointer approaches, fully on the words
 }
 function resetVerseFeedback() { if (!verseActive) verseGlow.jump(0); }
-function verseHoverChanged(active) {
+function verseHoverChanged(active, pace) {
   verseActive = active;
-  if (!still() && entered && (active ? modalState === 'closed' : current?.name !== 'verse')) animate(uniforms, { u_warm: active ? .4 : 0 }, { duration: active ? .5 : .8, ease });
+  if (!still() && entered && (active ? modalState === 'closed' : current?.name !== 'verse')) {
+    const control = animate(uniforms, { u_warm: active ? .4 : 0 }, !active && pace === 'snap' ? { duration: .31, ease: easeBack } : { duration: active ? .5 : .8, ease });
+    if (active) verseWarmIn = control;
+  }
 }
-function rowActive(element, active) {
+let classAmpIn = null, verseWarmIn = null;   // the row-1 and verse entrances: a touch's pull waits for them (src/touch.js)
+function rowTheta(element) {
+  const rect = element.getBoundingClientRect(), row = element.closest('.services').getBoundingClientRect();
+  return clamp((rect.left + rect.width / 2 - (row.left + row.width / 2)) / Math.max(1, row.width / 2), -1, 1);
+}
+function rowLon(element) { return rowTheta(element) * 1.15; }
+// Living verbs: a row-2 word's signature starts after 250 ms continuously on it (a sweep shows packets only); a touch
+// starts it at once. Leaving plays the entrance backwards; moving straight to another word snaps the old one (x1.6).
+const verbGates = new Map(), verbLinger = new Map(), verbBorn = new Map();
+function rowTwo(element, active, theta, pace) {
+  const verbs = model.verbs, name = element.dataset.verb;
+  if (!verbs || !name) return;
+  const isTouch = lastPointerType === 'touch' || lastPointerType === 'pen';
+  if (active) {
+    rowIntent = .5; refreshIntent();
+    verbs.snapExiting();
+    clearTimeout(verbLinger.get(name)); verbLinger.delete(name);
+    const go = () => { verbGates.delete(name); if (livingTokens.has('g0')) return; const s = verbs.enter(name, { theta, forward: model.cam.forward, legs: livingTokens.has('tp3') ? 3 : 2 }); verbBorn.set(name, performance.now() - (s?.tau || 0)); };
+    clearTimeout(verbGates.get(name));
+    if (isTouch) go(); else verbGates.set(name, setTimeout(go, 250));
+  } else {
+    rowIntent = 0; refreshIntent();
+    if (verbGates.has(name)) { clearTimeout(verbGates.get(name)); verbGates.delete(name); return; }
+    verbs.exit(name, pace === 'snap' ? 1.6 : 1);
+  }
+}
+function rowActive(element, active, event, pace) {
   if (!element.matches('.service')) return;
+  if (verbsOn && element.dataset.row === '2' && !active && still()) { model.verbs?.clear(); rowIntent = 0; refreshIntent(); sentinel.drawOnce(); return; }
   if (!active && still()) {   // always tear down; while still, set now and redraw instead of tweening
     animate(uniforms, element.dataset.row === '1' ? { u_classAmp: 0 } : { u_tight: 0, u_warm: 0 }, { duration: 0 }).complete();
     if (element.dataset.row === '1') { model.rowHover(-1); rowIntent = 0; refreshIntent(); }
@@ -351,17 +447,18 @@ function rowActive(element, active) {
   }
   if (still() || !entered) return;
   // Map the word's position across its row to ±66° of longitude: outer words run the limb meridians, inner words the front.
-  const rect = element.getBoundingClientRect(), row = element.closest('.services').getBoundingClientRect();
-  const theta = clamp((rect.left + rect.width / 2 - (row.left + row.width / 2)) / Math.max(1, row.width / 2), -1, 1);
-  const lon = theta * 1.15;
+  const theta = rowTheta(element), lon = theta * 1.15;
+  const snap = !active && pace === 'snap';           // a touch letting go: the entrance reversed, 0.625x as long
   if (active) ring(lon);
   if (element.dataset.row === '1') {
     const c = CLASS[element.dataset.class];
-    if (active) { uniforms.u_classSel.value = c; animate(uniforms, { u_classAmp: 1 }, { duration: .2 }); model.rowHover(c, lon, ROW_READING[c]); rowIntent = .5; }
-    else { animate(uniforms, { u_classAmp: 0 }, { duration: .4 }); model.rowHover(-1); rowIntent = 0; }
+    if (active) { uniforms.u_classSel.value = c; classAmpIn = animate(uniforms, { u_classAmp: 1 }, { duration: .2 }); model.rowHover(c, lon, ROW_READING[c]); rowIntent = .5; }
+    else { animate(uniforms, { u_classAmp: 0 }, { duration: snap ? .125 : .4 }); model.rowHover(-1); rowIntent = 0; }
     refreshIntent();
+  } else if (verbsOn) {
+    rowTwo(element, active, theta, pace);
   } else if (current?.name !== 'verse') {             // the open verse owns u_warm/u_tight; its closeScenery returns them to 0
-    animate(uniforms, { u_tight: active ? 1 : 0, u_warm: active ? 1 : 0 }, { duration: active ? .3 : .8, ease });
+    animate(uniforms, { u_tight: active ? 1 : 0, u_warm: active ? 1 : 0 }, snap ? { duration: .19, ease: easeBack } : { duration: active ? .3 : .8, ease });
   }
 }
 
@@ -372,6 +469,7 @@ document.addEventListener('focusin', event => {
   focusIntent = inDialog(event.target) ? .9 : targetIntent(target);
   const rect = event.target.getBoundingClientRect();
   visitPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, 'keyboard', target);
+  if (!inDialog(event.target)) living?.focus(rect, event.target.matches(':focus-visible'));
   if (!inDialog(event.target) && !still()) {
     const [nx, ny] = toNdc(rect.left + rect.width / 2, rect.top + rect.height / 2);
     model.state.keyboard = true; model.pointer(nx, ny, performance.now() - 1000);
@@ -380,6 +478,7 @@ document.addEventListener('focusin', event => {
 });
 document.addEventListener('focusout', () => queueMicrotask(() => {
   const active = document.activeElement;
+  if (!scene.contains(active) || inDialog(active)) living?.blur();
   if (!scene.contains(active) && !inDialog(active)) { focusIntent = 0; refreshIntent(); if (model.state.keyboard) { model.state.keyboard = false; model.leave(); } }
 }));
 form.addEventListener('input', () => {
@@ -404,27 +503,66 @@ function setImmediateMotion(element, values) {
   control.complete();
   return control;
 }
+// One arrow drawer for both buttons (the send button's pattern, now also the trigger's): on hover or focus-visible the arrow draws itself
+// in beside the centred label with a short glide; leaving retracts it the way it came (the stroke first, then the glide back); still:
+// at once. The arrow is absolute and hangs off the label's right edge, so the label never moves.
+function arrowDrawer(svg) {
+  const path = svg.querySelector('path');
+  let on = false, anims = [];
+  function set(next, instant) {
+    anims.forEach(control => control.stop());
+    if (instant) { anims = [setImmediateMotion(svg, { opacity: next ? 1 : 0, x: 0 }), setImmediateMotion(path, { pathLength: next ? 1 : 0 })]; return; }
+    const draw = [0.22, 1, 0.36, 1], undraw = [0.64, 0, 0.78, 0];
+    anims = next ? [
+      animate(svg, { opacity: 1 }, { duration: .16, ease: 'easeOut' }),
+      animate(svg, { x: [-8, 0] }, { type: 'spring', stiffness: 260, damping: 24 }),
+      animate(path, { pathLength: [0, 1] }, { duration: .42, ease: draw }),
+    ] : [
+      animate(path, { pathLength: 0 }, { duration: .28, ease: undraw }),
+      animate(svg, { x: -8 }, { duration: .3, ease: undraw }),
+      animate(svg, { opacity: 0 }, { duration: .18, delay: .14, ease: 'easeIn' }),
+    ];
+  }
+  setImmediateMotion(path, { pathLength: 0 });   // hidden at load (CSS opacity 0)
+  return {
+    show(next) { if (next === on) return; on = next; set(next, still()); },
+    reset() { set(on, true); },                  // pause / reduced motion: the current state, at once
+  };
+}
+const contactArrowSvg = $('.contact-arrow');
+const contactArrow = arrowDrawer(contactArrowSvg);
+// The trigger's peak: mouse/pen hover, focus-visible, a press (touch included) or a finger sliding onto it (source 'slide'). It drives
+// the arrow and the strand; the underline keeps its own drivers below, exactly as before.
+function setContactHover(on, source = 'slide') {
+  contactSources[source] = Boolean(on);
+  const s = contactSources, pointer = (s.hover && !hoverHeld) || s.press || s.slide, active = pointer || s.focus;
+  contactArrow.show(active);
+  sparkle.hover(active, active && !pointer);
+}
 function resetContactFeedback() {
   contactHover.forEach(control => control.stop());
-  contactHover = [
-    setImmediateMotion($('.contact-arrow'), { x: 0 }),
-    setImmediateMotion($('.contact-rule'), { scaleX: document.activeElement === trigger ? 1 : .3 }),
-  ];
+  const scale = document.activeElement === trigger ? 1 : .3;
+  contactHover = [setImmediateMotion($('.contact-rule'), { scaleX: scale }), sparkle.rule(scale)];
+  contactArrow.reset();
 }
-function highlightContact(active) {
+const ruleSpring = { type: 'spring', stiffness: 220, damping: 27 };
+const snapSpring = { type: 'spring', stiffness: 380, damping: 30 };
+function highlightContact(active, { pace = null } = {}) {
   contactHover.forEach(control => control.stop()); contactHover = [];
   if (still()) {
-    contactHover.push(setImmediateMotion($('.contact-rule'), { scaleX: active ? 1 : .3 }));
+    contactHover.push(setImmediateMotion($('.contact-rule'), { scaleX: active ? 1 : .3 }), sparkle.rule(active ? 1 : .3));
     return;
   }
+  const spring = pace === 'snap' ? snapSpring : ruleSpring;
   contactHover.push(
-    animate($('.contact-rule'), { scaleX: active ? 1 : .3 }, { type: 'spring', stiffness: 220, damping: 27 }),
-    animate($('.contact-arrow'), { x: active ? 4 : 0 }, { type: 'spring', stiffness: 220, damping: 27 }),
+    animate($('.contact-rule'), { scaleX: active ? 1 : .3 }, spring),
+    sparkle.rule(active ? 1 : .3, spring),   // the strand's copy of the line: the same call and spring, so its end sparks ride the live ends
   );
 }
-hover(trigger, () => { highlightContact(true); return () => highlightContact(false); });
-trigger.addEventListener('focus', () => highlightContact(true));
-trigger.addEventListener('blur', () => highlightContact(false));
+hover(trigger, () => { highlightContact(true); setContactHover(true, 'hover'); return () => { highlightContact(false); setContactHover(false, 'hover'); }; });
+trigger.addEventListener('focus', () => { highlightContact(true); setContactHover(trigger.matches(':focus-visible'), 'focus'); });
+trigger.addEventListener('blur', () => { highlightContact(false); contactSources.press = false; setContactHover(false, 'focus'); });
+trigger.addEventListener('keydown', event => { if (event.key === ' ' && !event.repeat) sparkle.press(null); });   // Enter arrives through press() below
 // Form messages arrive and leave as light, never as a jump: each field's error slot is reserved (CSS), a new message
 // fades and sharpens in, a cleared or replaced one fades out in place over its slot. The form code writes the text;
 // these observers only animate it.
@@ -449,37 +587,26 @@ function softenMessages(element) {
 document.querySelectorAll('.field-error, #form-status').forEach(softenMessages);
 // Tactile press without moving text: the arrows answer, the labels stay put.
 const pressSpring = { type: 'spring', stiffness: 400, damping: 30 };
-press(trigger, () => {
-  if (still()) return;
-  animate($('.contact-arrow'), { x: 8 }, pressSpring);
-  return () => animate($('.contact-arrow'), { x: 4 }, pressSpring);
+// The trigger's press is the send button's (the arrow drawn and pushed forward) plus a light along the strand from the press
+// (keyboard: from the label's centre). A press that ends off the button gives the peak back; a click opens the panel (blur clears it).
+press(trigger, (element, event) => {
+  setContactHover(true, 'press');
+  sparkle.press(event.pointerType ? event.clientX : null);
+  if (!still()) animate(contactArrowSvg, { x: 6 }, pressSpring);
+  return (end, info) => {
+    if (!info?.success) setContactHover(false, 'press');
+    if (!still()) animate(contactArrowSvg, { x: 0 }, pressSpring);
+  };
 });
 // The send button rests as a centred label. On hover or focus its arrow draws itself in beside the label with a short
 // glide; a press pushes it forward; leaving retracts it the way it came (the stroke first, then the glide back).
-const sendArrow = $('.send-arrow'), sendArrowPath = sendArrow.querySelector('path');
-let sendArrowOn = false, sendArrowAnims = [];
-function showSendArrow(on) {
-  if (on === sendArrowOn) return;
-  sendArrowOn = on; sendArrowAnims.forEach(control => control.stop());
-  if (still()) { sendArrowAnims = [setImmediateMotion(sendArrow, { opacity: on ? 1 : 0, x: 0 }), setImmediateMotion(sendArrowPath, { pathLength: on ? 1 : 0 })]; return; }
-  const draw = [0.22, 1, 0.36, 1], undraw = [0.64, 0, 0.78, 0];
-  sendArrowAnims = on ? [
-    animate(sendArrow, { opacity: 1 }, { duration: .16, ease: 'easeOut' }),
-    animate(sendArrow, { x: [-8, 0] }, { type: 'spring', stiffness: 260, damping: 24 }),
-    animate(sendArrowPath, { pathLength: [0, 1] }, { duration: .42, ease: draw }),
-  ] : [
-    animate(sendArrowPath, { pathLength: 0 }, { duration: .28, ease: undraw }),
-    animate(sendArrow, { x: -8 }, { duration: .3, ease: undraw }),
-    animate(sendArrow, { opacity: 0 }, { duration: .18, delay: .14, ease: 'easeIn' }),
-  ];
-}
-showSendArrow(false); sendArrowOn = false;
-setImmediateMotion(sendArrowPath, { pathLength: 0 });
-hover(sendButton, () => { showSendArrow(true); return () => { if (document.activeElement !== sendButton || !sendButton.matches(':focus-visible')) showSendArrow(false); }; });
-sendButton.addEventListener('focus', () => { if (sendButton.matches(':focus-visible')) showSendArrow(true); });
-sendButton.addEventListener('blur', () => showSendArrow(false));
+const sendArrow = $('.send-arrow');
+const sendArrowDrawer = arrowDrawer(sendArrow);
+hover(sendButton, () => { sendArrowDrawer.show(true); return () => { if (document.activeElement !== sendButton || !sendButton.matches(':focus-visible')) sendArrowDrawer.show(false); }; });
+sendButton.addEventListener('focus', () => { if (sendButton.matches(':focus-visible')) sendArrowDrawer.show(true); });
+sendButton.addEventListener('blur', () => sendArrowDrawer.show(false));
 press(sendButton, () => {
-  showSendArrow(true);
+  sendArrowDrawer.show(true);
   if (still()) return;
   animate(sendArrow, { x: 6 }, pressSpring);
   return () => animate(sendArrow, { x: 0 }, pressSpring);
@@ -487,6 +614,76 @@ press(sendButton, () => {
 hover(verseButton, () => { verseHoverChanged(true); return () => verseHoverChanged(false); });   // the ember warms behind it, as before
 verseButton.addEventListener('focus', () => { const r = verseText.getBoundingClientRect(); lightVerse(r.left + r.width / 2, r.top + r.height / 2, 1); });
 verseButton.addEventListener('blur', () => { if (!verseActive) verseGlow.set(0); });
+
+// Touch (src/touch.js): a sliding finger hovers as a mouse does, and a finger that lands on a row word, the conversation line, the
+// verse or the tagline holds it. motion's hover() ignores touch, so the module calls the same responses a mouse hover gets.
+const contactLabel = trigger.querySelector('span');
+let contactLabelLit = false;
+function lightContactLabel(on, pace = null, origin = null) {
+  if (on === contactLabelLit) return;
+  contactLabelLit = on; textFeedback.slide(contactLabel, on, { origin, pace });
+}
+const pullTokens = new WeakMap();   // a pull is written to the scene only once its element's entrance tween has finished
+function awaitEntrance(el, before, control) {
+  const token = {}; pullTokens.set(el, token);
+  if (control && control !== before) { token.waiting = true; control.then(() => { if (pullTokens.get(el) === token) { token.waiting = false; touch.repull(el); } }); }
+}
+const pullReady = el => !still() && entered && pullTokens.get(el)?.waiting === false;
+const textKind = (match, steal, extra = {}) => ({
+  match, steal, radius: [72, 56, 96],
+  enter(el, how, origin) { textFeedback.slide(el, true, { origin }); },
+  leave(el, how) { textFeedback.slide(el, false, { pace: how }); },
+  ...extra,
+});
+const touch = createTouchSelect({
+  scene, cage: anchor, still,
+  kinds: [
+    textKind('.service', true, {
+      enter(el, how, origin) { const before = classAmpIn; textFeedback.slide(el, true, { origin }); awaitEntrance(el, before, el.dataset.row === '1' ? classAmpIn : null); },
+      pull(el, P) { if (el.dataset.row === '1' && pullReady(el)) setImmediateMotion(uniforms, { u_classAmp: 1 + .35 * P }); },   // its class brightens under tension
+    }),
+    { match: '#open-contact', steal: true, radius: [80, 64, 104],
+      enter(el, how, origin, x, y) {
+        highlightContact(true); setContactHover(true, 'slide');
+        if (how === 'hover') this.track(el, x, y); else lightContactLabel(true, null, origin);
+      },
+      track(el, x, y) { const r = contactLabel.getBoundingClientRect(); lightContactLabel(x >= r.left && x <= r.right && y >= r.top && y <= r.bottom, null, x < r.left + r.width / 2 ? '0% 50%' : '100% 50%'); },   // the label's own box, as a mouse
+      leave(el, how) { highlightContact(false, { pace: how }); setContactHover(false, 'slide'); lightContactLabel(false, how); },
+    },
+    { match: '#open-verse', steal: true, radius: [72, 56, 96],
+      enter(el) { const before = verseWarmIn; verseHoverChanged(true); awaitEntrance(el, before, verseWarmIn); },
+      leave(el, how) { verseHoverChanged(false, how); },
+      pull(el, P) { if (pullReady(el) && modalState === 'closed') setImmediateMotion(uniforms, { u_warm: .4 + .15 * P }); },   // the ember reaches
+    },
+    textKind('.work-type', false),   // the tagline can be held but never takes a hold: it lies between the rows and the cage
+  ],
+  hand: {
+    point: touchPoint,
+    leave: leaveHand,
+    reassert(el) {   // after a held lift: model.leave() cleared the row's reading; the selection keeps it while it lingers
+      if (el.matches('.service[data-row="1"]') && !still() && entered) { const c = CLASS[el.dataset.class]; model.rowHover(c, rowLon(el), ROW_READING[c]); }
+      const engaged = el.closest('[data-react]');
+      setPointerElement(engaged); pointerIntent = engaged ? targetIntent(engaged) : 0; refreshIntent();
+    },
+    release() { setPointerElement(null); pointerIntent = 0; refreshIntent(); },
+  },
+});
+if (window.__tne) window.__tne.touch = touch;
+// A touch move feeds the scene exactly as the mouse path does; a held verse leans its blue light toward the finger instead.
+function touchPoint(event, engaged, holding, feed) {
+  setPointerElement(engaged);
+  visitPoint(event.clientX, event.clientY, 'touch', engaged);
+  if (holding?.el === verseButton && !current) {
+    const r = verseText.getBoundingClientRect(), nx = clamp(event.clientX, r.left, r.right), ny = clamp(event.clientY, r.top, r.bottom);
+    const dx = event.clientX - nx, dy = event.clientY - ny, l = Math.hypot(dx, dy), lean = l > 0 ? 22 * holding.P / l : 0;
+    lightVerse(nx + dx * lean, ny + dy * lean, 1);
+  }
+  if (!feed || still()) return;
+  const [nx, ny] = toNdc(event.clientX, event.clientY);
+  model.state.keyboard = false;
+  model.pointer(nx, ny, event.timeStamp);
+  if (model.simulate) sentinel.fluidPointer(event.clientX / innerWidth, 1 - event.clientY / innerHeight, event.timeStamp);
+}
 
 function resetServiceMotion() {
   if (still()) textFeedback.reset(); else textFeedback.refresh();
@@ -528,8 +725,9 @@ function lightCitation(clientX, clientY) {
   const t = clamp(1 - Math.hypot(dx, dy) / 120);
   citeGlowX.set(`${(clamp((clientX - rect.left) / Math.max(1, rect.width)) * rect.width).toFixed(1)}px`);
   citeGlow.set(t * t * (3 - 2 * t));   // smoothstep: it brightens as the pointer approaches, fully on the line
+  living?.citationNear(verseRef, t * t * (3 - 2 * t), clientX);
 }
-function dimCitation() { citeGlow.set(0); }
+function dimCitation() { citeGlow.set(0); living?.citationNear(verseRef, 0, 0); }
 function settleVerse() {
   setImmediateMotion([...verseWords, verseRef], { opacity: 1 });
   textFeedback.pin(verseRef, true); verseLined = true;   // the citation's underline, already in place
@@ -545,7 +743,7 @@ function revealVerse(live) {
   })));
   // the reference arrives after the last word and answers with the bullets' own response: a warm letter wave and the underline
   modalAnimations.push(animate(verseRef, { opacity: [0, 1] }, { delay: last + .03, duration: .9, ease: [0.37, 0, 0.63, 1] }));   // the citation arrives softly
-  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') { textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 }, keepLine: true }); verseLined = true; } }, last + .35);   // the underline draws out from the centre and stays
+  verseFlash?.(); verseFlash = delay(() => { verseFlash = null; if (current?.name === 'verse' && modalState !== 'closing') { textFeedback.flash(verseRef, 2200, { soft: { in: 1.0, out: 1.8, spread: .45 }, keepLine: true }); verseLined = true; living?.citationDrawn(verseRef); } }, last + .35);   // the underline draws out from the centre and stays
 }
 function concealVerse() {
   verseFlash?.(); verseFlash = null;
@@ -589,7 +787,7 @@ const dialogs = {
     onOpen() { if (!still()) { this.purpose = true; labels.setState('PURPOSE'); boost('u_boostGreet', .3, .9); } },   // the ember exhales as the panel leaves it
     reveal: revealVerse, settle: settleVerse, conceal: concealVerse,
     afterClose() {
-      textFeedback.pin(verseRef, false); verseLined = false; citeGlow.jump(0);   // hidden now; the next opening draws it in again
+      textFeedback.pin(verseRef, false); verseLined = false; citeGlow.jump(0); living?.citationOff(verseRef);   // hidden now; the next opening draws it in again
       if (this.purpose) {                                    // a reset that ran behind the verse keeps its word
         this.purpose = false;
         const s = model.state;
@@ -607,7 +805,7 @@ function openDialog(d, origin = d.origin) {
   stopModalAnimations();
   if (wasClosed) { returnFocus = origin; d.dialog.showModal(); d.openedAt = performance.now(); }
   current = d;
-  modalState = 'opening'; idle.jump(0); clearTimeout(idleTimer); stopSentry(); labels.hideAll();
+  modalState = 'opening'; idle.jump(0); clearTimeout(idleTimer); stopSentry(); labels.hideAll(); touch.cancel('modal');
   d.surface.scrollTop = 0; d.focus(); updateAmbient(); d.onOpen();
   if (reducedMotion.matches) {
     d.surface.style.transform = 'none'; d.surface.style.opacity = '1';

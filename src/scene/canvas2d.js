@@ -1,6 +1,6 @@
 import { frameRatio, damp, friction, smoothstep, clamp } from './damp.js';
 import { projectPx } from './camera.js';
-import { hexRGB, COLORS, NODES, LAG, HAND, RESET, EMBER_LIGHT } from './constants.js';
+import { hexRGB, COLORS, NODES, LAG, HAND, RESET, EMBER, EMBER_LIGHT } from './constants.js';
 
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
@@ -39,7 +39,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   const layer = document.createElement('canvas'), lctx = layer.getContext('2d');      // emissive layer on black: bloom adds only light
   const vmask = document.createElement('canvas'), vctx = vmask.getContext('2d');     // the ember's veil: front sprites union, erased once (a floor, like GL)
   const linkBuf = new Float32Array(model.plexus.maxVertices * 4);
-  const tmp = [0, 0, 0];
+  const tmp = [0, 0, 0], hFlow = [0, 0, 0];
 
   function ensureSprites(scale) {
     if (scale === spriteScale && sprites.length) return;
@@ -86,8 +86,8 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   }
   const gridAt = (u, v) => { const x = clamp(Math.floor(u * G.w), 0, G.w - 1), y = clamp(Math.floor(v * G.h), 0, G.h - 1); return y * G.w + x; };
 
-  function emberLevel(u, t) {
-    return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
+  function emberLevel(u, t, verbWarm = 0) {
+    return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * Math.max(u.u_warm.value, verbWarm))
       * (1 - 0.15 * u.u_tear.value) * (1 + 0.05 * Math.sin(1.9 * t) * u.u_idle.value);
   }
 
@@ -112,10 +112,14 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     const tapT = u.u_tapT.value, tapX = u.u_tapX.value, tapY = u.u_tapY.value, tapZ = u.u_tapZ.value, sentry = u.u_sentry.value;
     const KEY = cam.lightDir;
     const dens = 2000 / N;                              // luminance stays put as the sprite count changes
-    const lvl = emberLevel(u, time) * (0.55 + 0.45 * model.trailGrid.maxAround(cam.emberPx[0], cam.emberPx[1], W, H));   // the ember's level (a tear lets the warmth out)
-    const EV = cam.emberView, eReach2 = EMBER_LIGHT.reach * EMBER_LIGHT.reach, eFall2 = EMBER_LIGHT.falloff * EMBER_LIGHT.falloff, eGain = EMBER_LIGHT.light * Math.min(lvl, 1.2);
+    const verbs = model.verbs?.active() ? model.verbs : null, VB = verbs ? verbs.params(time) : null;   // living verbs: the CPU twin
+    const lvl = emberLevel(u, time, VB ? VB.ember.warm : 0) * (0.55 + 0.45 * model.trailGrid.maxAround(cam.emberPx[0], cam.emberPx[1], W, H));   // the ember's level (a tear lets the warmth out)
+    const reachK = VB ? VB.ember.reach : 1, lightK = VB ? VB.ember.light : 1, hv = [0, 0, 0];
+    const EV = cam.emberView, eReach2 = (EMBER_LIGHT.reach * reachK) ** 2, eFall2 = EMBER_LIGHT.falloff * EMBER_LIGHT.falloff, eGain = EMBER_LIGHT.light * lightK * Math.min(lvl, 1.2);
+    const flow = model.flow;
     for (let i = 0; i < N; i++) {
-      const hx = shape.homes[i * 4], hy = shape.homes[i * 4 + 1], hz = shape.homes[i * 4 + 2], r = shape.homes[i * 4 + 3];
+      let hx = shape.homes[i * 4], hy = shape.homes[i * 4 + 1], hz = shape.homes[i * 4 + 2]; const r = shape.homes[i * 4 + 3];
+      if (flow) { flow.apply(shape.ring[i], hx, hy, hz, hFlow); hx = hFlow[0]; hy = hFlow[1]; hz = hFlow[2]; }
       // build-inward front in view space
       const vxh = view4[0] * hx + view4[4] * hy + view4[8] * hz, vyh = view4[1] * hx + view4[5] * hy + view4[9] * hz;
       const sFront = Math.min(Math.hypot(vxh, vyh), 1) + 0.12 * r;
@@ -179,7 +183,8 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       }
       const tap = tapT > 0 && tapT < 1 ? Math.exp(-(((Math.hypot(hx - tapX, hy - tapY, hz - tapZ) - 2.4 * tapT) / 0.14) ** 2)) * (1 - tapT) : 0;
       const sen = sentry > 0 ? 0.15 * Math.exp(-(((0.5 + 0.5 * (hx * KEY[0] + hy * KEY[1] + hz * KEY[2]) / nl - (1 - sentry)) / 0.08) ** 2)) : 0;
-      const flick = r < 0.08 ? 0.6 + 0.4 * Math.sin(0.8 * time + 97 * r) * Math.sin(1.73 * time + 31 * r) : 1;
+      let flick = r < 0.08 ? 0.6 + 0.4 * Math.sin(0.8 * time + 97 * r) * Math.sin(1.73 * time + 31 * r) : 1, vMul = 1, vTone = 0;
+      if (verbs) { hv[0] = hx; hv[1] = hy; hv[2] = hz; const o = verbs.cpuLight(hv, r, vxh - EV[0], vyh - EV[1], flick, time); vMul = o[0]; flick = o[1]; vTone = o[2]; }
       const dfr = Math.hypot(vxh, vyh) - RF, wave = RA > 1e-3 ? RA * Math.exp(-dfr * dfr / (RB * RB)) : 0;   // the resync ring's light (the tap's vocabulary)
       const grow = 1 + 0.3 * (ring + tap + wave) + 0.12 * d2[i];
       const boost = 1 + 1.5 * (ring + tap + wave) + sen;
@@ -190,7 +195,6 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
         const dx_ = px - PR[0], dy_ = py - PR[1], dz_ = pz - PR[2], al = dx_ * HD[0] + dy_ * HD[1] + dz_ * HD[2];
         let hk2 = 1 - smoothstep(0, 1.1 * HAND.radius, Math.hypot(dx_ - HD[0] * al, dy_ - HD[1] * al, dz_ - HD[2] * al)); hk2 *= hk2 * handW(al); touch = s.wake * hk2;
       }
-      if (speed > 0.004 || tr2 > 0.25 || d2[i] > 0.45 || touch > 0.3 || wave > 0.3) tn = 3;
       // perspective size: nearer sprites larger; energy-conserving intensity
       const depth = w > 0 ? cam.dist / w : 1;
       const grain = (r * 13.7) % 1;                    // per-particle grain, fixed for life
@@ -199,16 +203,20 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
       const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
       const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
+      const limb = 0.25 + 0.75 * smoothstep(0.1, 0.6, Math.abs(dz));                              // 1 face-on .. 0.25 edge-on (matches GL's vLimb on the lingering trail)
+      if (speed > 0.004 || tr2 * limb > 0.25 || d2[i] > 0.45 || touch > 0.3 || wave > 0.3) tn = 3;
       const bead = BEAD[0] + (BEAD[1] - BEAD[0]) * ((r * 61.7) % 1) ** 3;   // fixed for life (the same second random as GL's beads)
-      inten[i] = 0.86 * dens * bead * built * flick * boost * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.6 * tr2 + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch) * (1 + 0.5 * head);
+      inten[i] = 0.86 * dens * bead * built * flick * boost * vMul * energy * (0.35 + 0.65 * lit) * back * (0.35 + 0.65 * Math.abs(dz)) * (1 + 0.2 * tr2 * limb + 0.8 * d2[i] * d2[i]) * (1 + 0.1 * u.u_engage.value) * (1 + touch) * (1 + 0.5 * head);
       // the ember inside the cage (as RENDER_FS): a sprite behind it shows its lit face and takes its tone; one in front catches a
       // quarter (its rim) and veils the source
       const vxp = view4[0] * px + view4[4] * py + view4[8] * pz + view4[12] - EV[0], vyp = view4[1] * px + view4[5] * py + view4[9] * pz + view4[13] - EV[1];
       const vzp = view4[2] * px + view4[6] * py + view4[10] * pz + view4[14] - EV[2], rho2 = vxp * vxp + vyp * vyp, nearer = vzp > 0;
       const eL = eGain * Math.exp(-rho2 / eReach2) / (1 + (rho2 + vzp * vzp) / eFall2) * (nearer ? 0.25 : 1);
       if (tn < 3 && (eL > 0.10 || (tone[i] === 4 && eL > 0.08))) tn = 4;   // hysteresis: the idle breath and drift never flicker the tone
+      if (vTone) tn = vTone;                                                     // living verbs: the glint (rim) or the dawn (ember-lit silver)
+      const rhoH = Math.sqrt(rho2) / EMBER.haloR;
       inten[i] *= 1 + 1.2 * eL;
-      veil[i] = nearer && rho2 < 0.25 ? 1 : 0;   // in front and within 0.5 R of the ember in the view plane
+      veil[i] = nearer && rho2 < 0.25 && rhoH > 0.09 ? 1 : 0;   // in front and within 0.5 R of the ember in the view plane; never a speck inside the core itself
       tone[i] = tn;
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----
@@ -221,7 +229,7 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     // air between the camera and everything, painted over the veil. Sprites behind it are painted later and only add.
     const ex = cam.emberPx[0], ey = H - cam.emberPx[1], er = cam.emberR;
     if (lvl > 0.001) {
-      const warm = u.u_warm.value, a = Math.min(1, lvl), air = 0.5;
+      const warm = Math.max(u.u_warm.value, VB ? VB.ember.warm : 0), a = Math.min(1, lvl), air = 0.5;
       let g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
       g.addColorStop(0, `rgba(255,${Math.round(226 + 10 * warm)},${Math.round(186 + 10 * warm)},${a})`);
       g.addColorStop(0.04, `rgba(255,216,166,${0.9 * a})`);

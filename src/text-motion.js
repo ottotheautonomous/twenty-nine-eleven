@@ -1,7 +1,8 @@
 import { animate, stagger, hover } from 'motion';
 
 // Keep hit areas and row geometry stationary; only the ink and light move.
-export function createTextMotion(elements, { canAnimate, onActive = null } = {}) {
+// ownsTouch(element): src/touch.js drives these elements' touch response (slide); their native touch flag is left to pens.
+export function createTextMotion(elements, { canAnimate, onActive = null, ownsTouch = null } = {}) {
   const records = new Map();
   const separators = new Map();
   const cleanups = [];
@@ -36,7 +37,7 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     record.colors = new Map(record.labels.map(label => [label, getComputedStyle(label).color]));
     record.chars = record.labels.flatMap(label => [...label.querySelectorAll('.motion-char')]);
   }
-  function updateSeparator(separator, owner, active, immediateOnly = false) {
+  function updateSeparator(separator, owner, active, immediateOnly = false, snap = false) {
     if (!separator) return;
     let state = separators.get(separator);
     if (!state) {
@@ -47,13 +48,14 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     state.controls.forEach(control => control.stop());
     const lit = state.owners.size > 0;
     const values = { scale: 1, color: lit ? '#ffe3b0' : state.color, opacity: lit ? 1 : .65 };   // the dots brighten; nothing changes size
-    state.controls = [immediateOnly || !canAnimate() ? immediate(separator, values) : animate(separator, values, { duration: .2, ease: 'easeOut' })];
+    state.controls = [immediateOnly || !canAnimate() ? immediate(separator, values) : animate(separator, values, snap ? { duration: .12, ease: 'easeIn' } : { duration: .2, ease: 'easeOut' })];
   }
   function visibleLabels(record) { return record.labels.filter(label => label.getClientRects().length); }
   function render(record, immediateOnly = false) {
     stop(record);
-    const active = record.hover || record.focus || record.touch;
+    const active = record.hover || record.focus || record.touch || record.slide;
     const spatial = canAnimate() && !immediateOnly;
+    const snap = !active && record.pace === 'snap';   // a touch letting go: the entrance reversed, quicker (0.625x, mirrored curves)
     const soft = record.soft;   // a soft flash: slow in, hold, slower out, the letters unwinding in reverse (exits mirror entrances)
     record.element.dataset.textActive = String(active);
     const labels = visibleLabels(record);
@@ -69,6 +71,8 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
         record.controls.push(animate(letters, { color: active ? '#ffe9c4' : record.colors.get(label) }, soft ? {
           duration: active ? soft.in : soft.out, ease: [0.37, 0, 0.63, 1],
           delay: stagger(soft.spread / Math.max(1, chars.length - 1), { from: active ? 'first' : 'last' }),
+        } : snap ? {
+          duration: .15, ease: 'easeIn', delay: stagger(.6 * Math.min(.012, .1 / Math.max(1, chars.length - 1)), { from: 'last' }),
         } : {
           duration: active ? .24 : .2, ease: 'easeOut',
           delay: active ? stagger(Math.min(.012, .1 / Math.max(1, chars.length - 1))) : 0,
@@ -86,14 +90,15 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       const lineTiming = soft ? { duration: lineOn ? soft.in + soft.spread : soft.out + soft.spread, ease: [0.37, 0, 0.63, 1] } : { duration: lineOn ? .24 : .18, ease: [0.22, 1, 0.36, 1] };
       record.controls.push(spatial ? animate(record.line, values, lineTiming) : immediate(record.line, values));
     }
-    record.dots.forEach(dot => updateSeparator(dot, record.element, active, !spatial));
+    if (snap && spatial && record.line && !record.pinned) record.controls.push(animate(record.line, { scaleX: 0, opacity: 0 }, { duration: .15, ease: [0.64, 0, 0.78, 0] }));   // toward its entrance origin
+    record.dots.forEach(dot => updateSeparator(dot, record.element, active, !spatial, snap && spatial));
     record.active = active;
   }
   function set(record, key, value, event = null) {
     if (record[key] === value) return;
     record[key] = value;
-    const active = record.hover || record.focus || record.touch;
-    if (active !== record.active) { render(record); onActive?.(record.element, active, event); }
+    const active = record.hover || record.focus || record.touch || record.slide;
+    if (active !== record.active) { render(record); onActive?.(record.element, active, event, record.pace); }
   }
 
   for (const element of elements) {
@@ -110,7 +115,7 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
       }
     }
     const line = element.matches('.service, [data-motion-line]') ? document.createElement('span') : null;   // the bullets' underline
-    const record = { element, color, canonical, labels: [], colors: new Map(), chars: [], line, dots: [], origin: '50% 50%', controls: [], hover: false, focus: false, touch: false, active: false, pinned: false, timer: 0 };
+    const record = { element, color, canonical, labels: [], colors: new Map(), chars: [], line, dots: [], origin: '50% 50%', controls: [], hover: false, focus: false, touch: false, slide: false, active: false, pinned: false, pace: null, timer: 0 };
     makeInk(record);
     if (line) { line.className = 'service-light'; line.setAttribute('aria-hidden', 'true'); element.appendChild(line); }
     records.set(element, record);
@@ -130,9 +135,11 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     const focusTarget = record.element.matches('label[for]') ? document.getElementById(record.element.htmlFor) : record.element.closest('button') || record.element;
     const focus = () => { record.origin = '50% 50%'; set(record, 'focus', true); };
     const blur = () => set(record, 'focus', false);
-    const down = event => { if (event.pointerType === 'touch' || event.pointerType === 'pen') { clearTimeout(record.timer); set(record, 'touch', true); } };
-    const up = event => { if (event.pointerType === 'touch' || event.pointerType === 'pen') record.timer = setTimeout(() => set(record, 'touch', false), 100); };
-    const cancel = () => { clearTimeout(record.timer); set(record, 'touch', false); };
+    const owned = ownsTouch?.(record.element);
+    const native = event => event.pointerType === 'pen' || (event.pointerType === 'touch' && !owned);
+    const down = event => { if (native(event)) { clearTimeout(record.timer); set(record, 'touch', true); } };
+    const up = event => { if (native(event)) record.timer = setTimeout(() => set(record, 'touch', false), 100); };
+    const cancel = event => { if (event.pointerType !== 'touch' || !owned) { clearTimeout(record.timer); set(record, 'touch', false); } };
     focusTarget?.addEventListener('focus', focus); focusTarget?.addEventListener('blur', blur);
     record.element.addEventListener('pointerdown', down, { passive: true });
     record.element.addEventListener('pointerup', up, { passive: true });
@@ -140,6 +147,14 @@ export function createTextMotion(elements, { canAnimate, onActive = null } = {})
     cleanups.push(() => { focusTarget?.removeEventListener('focus', focus); focusTarget?.removeEventListener('blur', blur); record.element.removeEventListener('pointerdown', down); record.element.removeEventListener('pointerup', up); record.element.removeEventListener('pointercancel', cancel); clearTimeout(record.timer); });
   }
   return {
+    // a touch's hover (src/touch.js): on while a finger holds or passes over the element. origin: the underline's growth side (a
+    // touchdown keeps the last one, as the native flag did); pace 'snap': a letting go plays the entrance reversed, quicker.
+    slide(element, on, { origin = null, pace = null } = {}) {
+      const record = records.get(element);
+      if (!record) return;
+      if (origin) record.origin = origin;
+      record.pace = pace; set(record, 'slide', on); record.pace = null;
+    },
     setText(element, text) {
       const record = records.get(element);
       if (!record) { element.textContent = text; return; }

@@ -91,9 +91,12 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 .work-tail { white-space: nowrap; }                    /* "& multidisciplinary design" never splits; phones break before it (below) */
 .services li.services-break { display: none; }         /* the rows' line breaks (as .name-break): off until a row wraps */
 
-.contact-trigger-shell { margin-top: 30px; }
-.contact-trigger { position: relative; display: flex; gap: 20px; align-items: center; justify-content: center; height: 48px; padding: 0 4px; color: var(--silver); background: transparent; border: 0; font-size: 14px; letter-spacing: .005em; }
-.contact-arrow { height: 16px; width: 16px; fill: none; stroke: var(--dawn); stroke-width: 1.15; }
+.contact-trigger-shell { position: relative; margin-top: 30px; }
+/* The label is the only in-flow child, so it is truly centred (padding 22 = the old 4 + (20 gap + 16 arrow) / 2: the box is unchanged).
+   The arrow hangs off its right edge like the send button's, hidden until hover or focus-visible; its tip lands on the full rule's end. */
+.contact-trigger { position: relative; display: flex; gap: 20px; align-items: center; justify-content: center; height: 48px; padding: 0 22px; color: var(--silver); background: transparent; border: 0; font-size: 14px; letter-spacing: .005em; }
+.contact-arrow { position: absolute; top: 50%; right: -3.2px; height: 16px; width: 16px; margin-top: -8px; fill: none; stroke: var(--dawn); stroke-width: 1.15; opacity: 0; pointer-events: none; }
+.contact-sparkle { position: absolute; left: 0; top: 0; pointer-events: none; }   /* the dust, under the button; placed and sized by src/sparkle.js */
 .contact-rule { position: absolute; bottom: 2px; left: 0; right: 0; height: 1px; background: var(--dawn); opacity: .7; transform: scaleX(.3); transform-origin: center; }
 
 .verse { margin: 28px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.6; letter-spacing: .02em; color: var(--muted); }
@@ -113,6 +116,41 @@ h1 { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .24em;
 }
 @media (hover: none) { .verse-text { --verse-rest: var(--muted); } }
 .no-script { font: 11px 'IBM Plex Mono', monospace; color: var(--muted); margin-top: 18px; }
+/* LIVING (PROTOTYPE, ?living=<flags>; nothing here applies without the flag attribute). The overlay dust window rides the light by
+   transform; the underline's light lives in its ::before (a child of the drawn line, so it leaves with the line's own exit). */
+.living-dust { position: fixed; left: 0; top: 0; z-index: 0; pointer-events: none; will-change: transform; }
+html[data-living] .service-light::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+  --sl: calc(var(--swell-x, 0px) - var(--swell-w, 0px)); --sr: calc(var(--swell-x, 0px) + var(--swell-w, 0px)); --lx: var(--lamp-x, 0px);
+  --bl: 255 246 234;
+  background:
+    linear-gradient(90deg, transparent calc(var(--sl) - 30px), rgb(var(--bl) / calc(var(--swell-al, 0) * .14)) calc(var(--sl) - 20px), rgb(var(--bl) / calc(var(--swell-al, 0) * .61)) calc(var(--sl) - 10px),
+      rgb(var(--bl) / var(--swell-al, 0)) var(--sl), rgb(var(--bl) / calc(var(--swell-al, 0) * .61)) calc(var(--sl) + 10px), rgb(var(--bl) / calc(var(--swell-al, 0) * .14)) calc(var(--sl) + 20px), transparent calc(var(--sl) + 30px)),
+    linear-gradient(90deg, transparent calc(var(--sr) - 30px), rgb(var(--bl) / calc(var(--swell-ar, 0) * .14)) calc(var(--sr) - 20px), rgb(var(--bl) / calc(var(--swell-ar, 0) * .61)) calc(var(--sr) - 10px),
+      rgb(var(--bl) / var(--swell-ar, 0)) var(--sr), rgb(var(--bl) / calc(var(--swell-ar, 0) * .61)) calc(var(--sr) + 10px), rgb(var(--bl) / calc(var(--swell-ar, 0) * .14)) calc(var(--sr) + 20px), transparent calc(var(--sr) + 30px)),
+    linear-gradient(90deg, transparent calc(var(--lx) - 60px), rgb(var(--bl) / calc(var(--lamp-a, 0) * .14)) calc(var(--lx) - 40px), rgb(var(--bl) / calc(var(--lamp-a, 0) * .61)) calc(var(--lx) - 20px),
+      rgb(var(--bl) / var(--lamp-a, 0)) var(--lx), rgb(var(--bl) / calc(var(--lamp-a, 0) * .61)) calc(var(--lx) + 20px), rgb(var(--bl) / calc(var(--lamp-a, 0) * .14)) calc(var(--lx) + 40px), transparent calc(var(--lx) + 60px)); }
+html[data-living~='halo'] .service-light::before { top: -2px; bottom: -2px; filter: blur(1.2px); }   /* variant: the band glows 2 px past the 1 px line */
+html[data-living~='breath'] .service-light { filter: brightness(var(--breath, 1)); }
+/* A held touch selection leans its light toward the finger (src/touch.js writes, on the held element: --pull 0..1, the direction
+   --pull-x/-y, --pull-side +-1, --pull-ax = max(.35, |x|), --pull-k the strain before a release, --pull-room the space to the screen
+   edge). Light only: a hairline tail beyond the underline or the rule and a warm glow; nothing here moves or resizes text. */
+.service[data-held] { text-shadow: 0 1px 14px #030810, calc(3px * var(--pull, 0) * var(--pull-x, 0)) calc(2px * var(--pull, 0) * var(--pull-y, 0)) calc(4px + 8px * var(--pull, 0)) rgb(255 226 184 / calc(.42 * var(--pull, 0) * (1 + .2 * var(--pull-k, 0)))); }
+.work-type[data-held] { text-shadow: calc(3px * var(--pull, 0) * var(--pull-x, 0)) calc(2px * var(--pull, 0) * var(--pull-y, 0)) calc(4px + 8px * var(--pull, 0)) rgb(255 226 184 / calc(.42 * var(--pull, 0) * (1 + .2 * var(--pull-k, 0)))); }
+.contact-trigger[data-held] > span:first-child { text-shadow: calc(3px * var(--pull, 0) * var(--pull-x, 0)) calc(2px * var(--pull, 0) * var(--pull-y, 0)) calc(4px + 8px * var(--pull, 0)) rgb(255 216 166 / calc(.38 * var(--pull, 0) * (1 + .2 * var(--pull-k, 0)))); }
+.service[data-held] > .service-light::after, .contact-trigger[data-held] .contact-rule::after {
+  --tail: calc(min(40%, 36px, var(--pull-room, 36px)) * var(--pull, 0) * var(--pull-ax, .35));
+  content: ''; position: absolute; top: 0; height: 1px; width: var(--tail); pointer-events: none;
+  left: calc(50% + 50% * var(--pull-side, 1) - (.5 - .5 * var(--pull-side, 1)) * var(--tail));   /* from the end on the finger's side, outward */
+  background: linear-gradient(calc(90deg * var(--pull-side, 1)), #FFEBD0e6, transparent); opacity: calc(.9 + .1 * var(--pull-k, 0)); }
+.contact-trigger[data-held] .contact-rule::after { --tail: calc(min(30%, 48px, var(--pull-room, 48px)) * var(--pull, 0) * var(--pull-ax, .35)); background: linear-gradient(calc(90deg * var(--pull-side, 1)), var(--dawn), transparent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) and (color: color-mix(in oklab, red 50%, blue)) {
+  .verse-button[data-held] .verse-text {   /* the verse's own blue light is its selection: held, it widens as it leans (main.js leans it) */
+    background-image: radial-gradient(ellipse calc(78px + 44px * var(--pull, 0)) calc(46px + 8px * var(--pull, 0)) at var(--verse-x, 50%) var(--verse-y, 50%),
+      color-mix(in oklab, var(--sky) calc(var(--verse-glow, 0) * 100%), var(--verse-rest)) 0%,
+      color-mix(in oklab, var(--sky-deep) calc(var(--verse-glow, 0) * 70%), var(--verse-rest)) 48%,
+      var(--verse-rest) 100%);
+  }
+}
 
 .motion-toggle { position: fixed; z-index: 3; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: 36px; height: 36px; padding: 9px; border: 1px solid #ffffff1f; border-radius: 50%; background: #0a1113cc; color: #9fb3ae; opacity: .6; }
 .motion-toggle svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.2; }

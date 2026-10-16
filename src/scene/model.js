@@ -2,6 +2,7 @@ import { createPointerFilter, createCascade, frameRatio, friction, clamp, smooth
 import { createPlexusLogic } from './plexus.js';
 import { createCameraState, computeCamera, screenToWorldOnCentrePlane } from './camera.js';
 import { FINDING } from './shape.js';
+import { createFlow } from './flow.js';
 import { LAG, EXPOSURE, ORBIT, TIMING, INTEGRITY, RESET, TEAR, NODES } from './constants.js';
 const inOut3 = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 const ZERO2 = [0, 0];
@@ -100,6 +101,7 @@ export function createModel(shape, uniforms) {
   const trailGrid = createTrailGrid(48, 27);
   const gridSeg = { acc: 0, ax: 0.5, ay: 0.5, radius: 0 };   // the grid's own segment since its last fixed-rate tick
   const cam = createCameraState();
+  const flow = createFlow(shape.set);
   const s = {
     time: 0, simulate: false, inScene: false, returning: false, still: false, modal: false, keyboard: false,
     raw: [0, 0], lastRaw: [0, 0], lastPointerAt: -1e9, pointerDirty: false,
@@ -131,6 +133,7 @@ export function createModel(shape, uniforms) {
     const ratio = frameRatio(dtMs), dt = Math.min(Math.max(dtMs, 0), 100) / 1000, u = uniforms, motion = u.u_motion.value;
     const now = performance.now();
     s.time += dt * motion;
+    flow.step(dt * motion, s.time, s.simulate && motion > 0);
     s.aspect = view.width / Math.max(1, view.height);
     if (!cam.ready) computeCamera(cam, u, view, { yaw: 0, pitch: 0 }, [0, 0, 0]);
     // 0. the trail segment: the model owns a -> b. The renderers only read it and clear pressDisc.
@@ -178,6 +181,7 @@ export function createModel(shape, uniforms) {
     lean[0].step(clamp(leanAim[0], -1.5, 1.5), ratio); lean[1].step(clamp(leanAim[1], -1.5, 1.5), ratio);
     // 4. camera for this frame
     computeCamera(cam, u, view, { yaw: s.yaw, pitch: s.pitch }, [lean[0].value, lean[1].value]);
+    if (api.verbs && motion && s.simulate) api.verbs.step(dtMs);   // PROTOTYPE living verbs: stepped on the frame clock
     // 5. CPU trail twin and integrity. The grid gets the real previous -> current segment (b advances here) and
     //    paints only while the hand moves: lag velocity lingers after a stop and must never paint at the rest point.
     //    Sub-stepped at 30 Hz so the dip matches 60 Hz.
@@ -297,6 +301,7 @@ export function createModel(shape, uniforms) {
     s.poke = 0; s.wake = 0; s.probeJump = true; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
     s.handDir[0] = 0; s.handDir[1] = 0; s.handDir[2] = -1;
     s.tier0.on = false; s.tier0.since = -1;
+    api.verbs?.clear();
     trailGrid.clear();
     publish();
     if (view) computeCamera(cam, uniforms, view, { yaw: 0, pitch: 0 }, [0, 0, 0]);
@@ -349,9 +354,10 @@ export function createModel(shape, uniforms) {
     if (s.forcedNode >= 0) { hold[s.forcedNode] = Infinity; if (reading) s.forcedText = reading; }
   }
 
-  return {
-    state: s, cam, plexus, trailGrid, shape, step, drawStill, pointer, press, tap, enter, leave, rowHover,
+  const api = {
+    state: s, cam, plexus, trailGrid, shape, flow, verbs: null, step, drawStill, pointer, press, tap, enter, leave, rowHover,
     get labels() { return s.labels; }, get linkAlpha() { return s.linkAlpha; }, get simulate() { return s.simulate; },
     get time() { return s.time; }, get trail() { return s.trail; }, get orbitNorm() { return s.orbitNorm; },
   };
+  return api;
 }

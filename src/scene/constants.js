@@ -20,9 +20,9 @@ export const EMBER = { coreR: 0.045, haloR: 0.42, hdr: 3.0, halo: 0.25, offset: 
 // The ember is a light INSIDE the cage. light: its colour added to a grain's lit face (x emberLevel x the falloff); reach: view-plane
 // sigma (R) of that light, so the cage outside the halo stays cold silver; falloff: radius (R) of the 1/(1+(d/falloff)^2) term (at rest
 // every strut sits 1 R away: only a scattered particle that comes close flares); split: depth softness (R) of "nearer than the ember"
-// (only those particles cover it); occCore/occHalo: the most a front strut takes from the core / the halo (x (1 - e^-3): floors 19 % / 57 %; the rest of the halo is the
+// (only those particles cover it); occCore/occHalo: the most a front strut takes from the core / the halo (x (1 - e^-3): floors 71 % / 81 %; the rest of the halo is the
 // glow in the air in front of the strut: never cut); veil: the Canvas2D tier's erase under a front sprite.
-export const EMBER_LIGHT = { light: 0.9, reach: 0.32, falloff: 1.0, split: 0.15, occCore: 0.85, occHalo: 0.45, veil: 0.8 };   // veil: one erase of the union (GL's core max ~0.81)
+export const EMBER_LIGHT = { light: 0.9, reach: 0.32, falloff: 1.0, split: 0.15, occCore: 0.30, occHalo: 0.20, veil: 0.3 };   // veil: one erase of the union (GL's core max ~0.29)
 export const TIMING = { greet: 0.6, lose: 1.5, tier0Dwell: 0.4, tier0Radius: 0.3, sentryEvery: 9, sentryDur: 2.5, idleAfter: 4 };
 // Integrity is a ledger. Under the hand the deficit only grows: a capped live reading of the trail (soft-saturating) or the
 // damage accrued while the hand paints (rate acc, saturating), never below floor. After `quiet` s with no painting the reset
@@ -49,3 +49,20 @@ export const linearRGB = (hex) => hexRGB(hex).map(srgbToLinear);
 export const TILT = { on: true, askIOS: false, ease: 1.5,
   lean: 1.5, soft: 16, dead: 1.5, still: 4, settle: 2.0, settleTau: 3.0, driftTau: 20, repose: 40, reposeOut: 2, reposeTau: 0.4,
   side: [0.80, 0.95], warm: 300, gap: 500 };   // side: |screen-x . gravity| fade (held sideways under rotation lock); warm/gap: ms
+// The flow: each ring's dust slides along its own ring (flow.js). Grain homes turn about their ring's own axis, so the strands, the
+// readout nodes and their labels never move; only the dust and its beads travel. The front and back arcs of a ring slide in opposite
+// directions on screen: the kinetic depth cue the near-orthographic camera otherwise lacks. Not random: m (speed multipliers, 10
+// stratified values 0.62-1.38) and dir are seeded (8898) and frozen, chosen so ~30 % of the motion is one shared slow current about a
+// near-vertical axis ("one body, many voices"); each ring's pace drifts +-vary on its own incommensurate period (s) and phase (rad).
+// lap: s per lap at m = 1 (150: median grain 4.5 CSS px/s at 1440x900). easeIn / resume / calmEase: MILLISECONDS of the speed gain from
+// 0 once the cage is built / after a pause, a modal or a hidden tab (the phase is held, never reset) / into and out of the reading calm
+// (x (1 - calm) while a readout shows or a row word is hovered). depth: the GL back-hemisphere tone (the back pole x (1 - depth)).
+// Set 0 (AX5, the six-ring fallback) uses entries 0-5.
+export const FLOW = {
+  lap: 150,
+  m: [1.296, 0.620, 1.127, 0.704, 0.873, 0.958, 0.789, 1.380, 1.211, 1.042],
+  dir: [1, -1, 1, 1, 1, -1, -1, 1, 1, 1],
+  vary: 0.15, period: [43, 71, 53, 89, 61, 47, 79, 59, 97, 67], phase: [0.3, 2.1, 4.0, 1.2, 5.5, 3.3, 0.9, 2.8, 4.7, 1.7],
+  easeIn: 2400, resume: 1200, calm: 0.35, calmEase: 700,
+  depth: 0.18,
+};

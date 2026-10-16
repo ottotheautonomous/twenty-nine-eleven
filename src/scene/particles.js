@@ -6,8 +6,9 @@
 // the warm term and the build; the spring weakens under the trail; morphing removed.
 import { createProgram, bindTex, FULLSCREEN_VS } from './gl.js';
 import { LAG, HAND, RESET, EMBER_LIGHT } from './constants.js';
+import { FLOW, FLOW_GLSL } from './flow.js';
 
-const SIM_FS = (noiseSrc, sdfSrc) => noiseSrc + sdfSrc + `
+const SIM_FS = (noiseSrc, sdfSrc) => noiseSrc + sdfSrc + FLOW_GLSL + `
 in vec2 vUv;
 uniform sampler2D uOff, uVel, uAux, uHome, uFluid, uTrail;
 uniform mat4 uViewProj, uView;
@@ -19,13 +20,14 @@ uniform float uPoke, uShove, uDrag;    // raw pointer speed 0..1 (0.15 s tail); 
 uniform vec3 uHand;                    // reach across the ray (R), far side's share, per-particle spread
 uniform vec3 uReset; uniform float uKick;   // the resync front: (radius R, amp, band sigma); kick toward home as it passes
 uniform float uFluidPush, uSwirl, uSwirlFreq, uSpring, uAttract, uFriction, uSpeedLerp, uWrap, uBound;
+uniform vec4 uVRes; uniform vec3 uVResA;       // PROTOTYPE living verbs: Resolve (front rad, band phase, on, crest), its anchor
 layout(location = 0) out vec4 oOff;            // xyz offset from home, w = wrap-diffuse lighting
 layout(location = 1) out vec4 oVel;            // xyz, w = smoothed speed
 layout(location = 2) out vec4 oAux;            // d1, d2 (cascaded displacement), warm, built
 void main() {
   ivec2 c = ivec2(gl_FragCoord.xy);
   vec4 Hm = texelFetch(uHome, c, 0), O = texelFetch(uOff, c, 0), V = texelFetch(uVel, c, 0), A = texelFetch(uAux, c, 0);
-  vec3 home = Hm.xyz; float r = Hm.w;
+  int kf = int(Hm.w); vec3 home = flowHome(Hm.xyz, kf); float r = fract(Hm.w);
   vec3 p = home + O.xyz, v = V.xyz;
 
   // Build-inward front: expands from the ember outward in screen space, noise-perturbed.
@@ -68,15 +70,19 @@ void main() {
   v += (dq / dd) * hand * uShove * uRatio;                                                       // in the view plane, away from the pointer
   v += uPokeVel * hand * uDrag * uRatio;                                                         // along the hand's motion
   v += (uCamRight * f.x + uCamUp * f.y) * uFluidPush * uRatio;                                   // 1 fluid push (the tear)
-  vec3 n = BitangentNoise4D(vec4(p * uSwirlFreq, uTime * (1.0 + 0.7 * r)));
-  v += n * uSwirl * (1.0 - 0.5 * uTight) * (0.7 + 0.3 * r) * uRatio;                            // 2 swirl
+  vec3 n = BitangentNoise4D(vec4((Hm.xyz + p - home) * uSwirlFreq, uTime * (1.0 + 0.7 * r)));   // the noise rides with the grain along its ring
+  float vCoh = uVRes.z > 0.0 ? smoothstep(0.0, 0.6, uVRes.x - acos(clamp(dot(normalize(home), uVResA), -1.0, 1.0))) : 0.0;   // PROTOTYPE Resolve: noise settles
+  v += n * uSwirl * (1.0 - 0.5 * uTight) * (1.0 - 0.35 * vCoh) * (0.7 + 0.3 * r) * uRatio;      // 2 swirl
   v += (homeT - p) * uKick * wave * uRatio;                                                     // the front kicks it home
   float k = uSpring * (1.0 + 0.3 * uTight) * built * (1.0 - 0.65 * min(fl, 1.0)) * (1.0 - 0.7 * trail * (1.0 - behind));
   v += (homeT - p) * k * uRatio;                                                                 // 3 spring
-  float d = sdfScene(p / scale) * scale;
-  vec3 g = sdfGradientTetra(p / scale, 1e-3);
-  vec3 nrm = g / max(length(g), 1e-6);
-  if (d > 0.0) v -= nrm * uAttract * built * (0.7 + 0.3 * r) * uRatio;                           // 4 attraction to the tubes
+  // The grain's OWN tube (analytic): distance and normal from the nearest point of its ring's circle (radius = scale),
+  // so flowing grains at crossings aren't captured by the crossing ring.
+  vec3 nW = uFlowAx[kf]; float hN = dot(p, nW); vec3 pr = p - nW * hN; float rho = max(length(pr), 1e-6);
+  vec3 dv = p - pr * (scale / rho); float dl = max(length(dv), 1e-6);
+  float d = dl - 0.03 * scale;
+  vec3 nrm = dv / dl;
+  if (d > 0.0) v -= nrm * uAttract * built * (0.7 + 0.3 * r) * uRatio;                           // 4 attraction to its own tube
 
   v *= uFriction;
   v = clamp(v, vec3(-0.5), vec3(0.5));
@@ -92,7 +98,8 @@ void main() {
   oAux = vec4(d1, d2, warm, built);
 }`;
 
-export const RENDER_VS = `
+export const RENDER_VS = FLOW_GLSL + `
+uniform float uDepthTone;
 uniform sampler2D uOff, uVel, uAux, uHome;
 uniform mat4 uView, uProj;
 uniform float uSizeK, uMaxPoint, uTime;
@@ -105,12 +112,23 @@ uniform vec3 uReset;         // the resync front (radius R, amp, band sigma): th
 uniform vec3 uEmberView;     // the ember, view space
 uniform vec3 uEmberLit;      // (reach sigma R, depth-split softness R, 3D falloff radius R)
 uniform vec2 uBead;          // the per-grain bead gain's range (lo, hi), eased with the grain count (webgl.js drawOpts)
-out float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk; out vec3 vToE;
+// PROTOTYPE living verbs (LIVING-SPEC 4): the six row-2 signatures, light placed in home space; each block is uniform-gated
+uniform vec3 uRingN[10], uRingE1[10], uRingE2[10];   // the ten great circles (world): normal and the frame of their along-ring angle
+uniform vec4 uVRes; uniform vec3 uVResA;   // Resolve: (front rad, band phase, on, phone crest light), anchor
+uniform vec4 uVAp;           // Aperture: (radius R, light, attention, on)
+uniform vec4 uVCo[6];        // Compose: per edge (ring, a0, len, light); ring < 0 = none
+uniform vec4 uVCoB;          // Compose: (bleed share of the edge light, bleed reach rad, on, -)
+uniform vec4 uVTpL[3];       // Toolpath: per leg (ring, start angle, dir, len)
+uniform vec4 uVTp;           // Toolpath: (head s rad, head light, tau ms, on)
+uniform vec4 uVTpT;          // Toolpath: (plunge ms, dwell ms, feed rad/ms, legs)
+uniform float uVEdL[10], uVEdS[10]; uniform float uVEd;   // Edit: per-ring light delta and grain size; on
+uniform vec3 uTGlint, uTWhite, uTDawn;
+out float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk, vLimb; out vec3 vToE; out vec4 vTint;
 void main() {
   int w = textureSize(uHome, 0).x;
   ivec2 c = ivec2(gl_VertexID % w, gl_VertexID / w);
   vec4 Hm = texelFetch(uHome, c, 0), O = texelFetch(uOff, c, 0), V = texelFetch(uVel, c, 0), A = texelFetch(uAux, c, 0);
-  vec3 home = Hm.xyz; float r = Hm.w;
+  int kf = int(Hm.w); vec3 home = flowHome(Hm.xyz, kf); float r = fract(Hm.w);
   vec3 p = home + O.xyz;
   vec4 vp = uView * vec4(p, 1.0);
   gl_Position = uProj * vp;
@@ -123,22 +141,77 @@ void main() {
   float tap = (uTap.w > 0.0 && uTap.w < 1.0) ? exp(-pow((distance(home, uTap.xyz) - 2.4 * uTap.w) / 0.14, 2.0)) * (1.0 - uTap.w) : 0.0;
   float sentry = uSentry > 0.0 ? 0.15 * exp(-pow((0.5 + 0.5 * dot(normalize(home), uKey) - (1.0 - uSentry)) / 0.08, 2.0)) : 0.0;
   float flick = r < 0.08 ? 0.6 + 0.4 * sin(0.8 * uTime + 97.0 * r) * sin(1.73 * uTime + 31.0 * r) : 1.0;
+  // ---- PROTOTYPE living verbs ----
+  float vAdd = 0.0, vMul = 1.0, vSz = 1.0; vec3 tRgb = vec3(0.0); float tW = 0.0;
+  int rk = 0; float rth = 0.0;
+  if (uVCoB.z > 0.0 || uVTp.w > 0.0 || uVEd > 0.0) {   // which ring the grain lies on, and its angle along it
+    float bd = 1e9; for (int k = 0; k < 10; k++) { float d = abs(dot(home, uRingN[k])); if (d < bd) { bd = d; rk = k; } }
+    rth = atan(dot(home, uRingE2[rk]), dot(home, uRingE1[rk]));
+  }
+  if (uVRes.z > 0.0) {         // Resolve: the twinkle falls into step behind a coherence front from the anchor; its mean is kept
+    float gc = acos(clamp(dot(normalize(home), uVResA), -1.0, 1.0));
+    float c = smoothstep(0.0, 0.6, uVRes.x - gc), band = sin(2.4 * gc - uVRes.y);
+    if (r < 0.08) flick = 0.6 + 0.4 * mix(sin(0.8 * uTime + 97.0 * r) * sin(1.73 * uTime + 31.0 * r), band, c);
+    else if (r < 0.22) vMul *= 1.0 + 0.4 * c * band;   // the set grows from 8 % to 22 %; new members twinkle about 1, so no light is added
+    vAdd += uVRes.w * c * smoothstep(0.5, 1.0, band);   // phones only: the crests +0.12
+  }
+  if (uVAp.w > 0.0) {          // Aperture: a view-space ring closing on the ember; outside it the cage gives 6 % to the attention
+    float rs = length((uView * vec4(home, 1.0)).xy - uEmberView.xy);
+    float ap = uVAp.y * exp(-pow((rs - uVAp.x) / 0.05, 2.0)) * (1.0 - 0.5 * smoothstep(0.7, 1.0, rs)) * smoothstep(0.24, 0.3, rs);
+    vAdd += ap; vMul *= 1.0 - uVAp.z * smoothstep(uVAp.x, uVAp.x + 0.08, rs);
+  }
+  if (uVCoB.z > 0.0) {         // Compose: one cell's edges, each lit whole at once; then light bleeds past its corners
+    for (int i = 0; i < 6; i++) {
+      vec4 e = uVCo[i];
+      if (e.x < 0.0 || int(e.x + 0.5) != rk) continue;
+      float u = mod(rth - e.y + 3.14159265, 6.2831853) - 3.14159265;        // along the edge from its first corner
+      float inside = smoothstep(-0.025, 0.0, u) * smoothstep(e.z + 0.025, e.z, u);
+      float out_ = max(-u, u - e.z), bl = out_ > 0.0 ? 1.0 - smoothstep(0.0, uVCoB.y, out_) : 0.0;
+      float add = e.w * (inside + uVCoB.x * bl * bl * (1.0 - inside));
+      vAdd += add; tRgb += uTGlint * add; tW += add;
+    }
+  }
+  if (uVTp.w > 0.0) {          // Toolpath: a white-hot head at constant feed; the cut behind it holds and cools from dawn to silver
+    float U = 0.0, tAt = uVTpT.x;
+    for (int i = 0; i < 3; i++) {
+      if (float(i) >= uVTpT.w) break;
+      vec4 L = uVTpL[i];
+      if (int(L.x + 0.5) == rk) {
+        float u = mod(L.z * (rth - L.y) + 3.14159265, 6.2831853) - 3.14159265;
+        if (u > -0.15 && u < L.w + 0.15) {
+          float uu = U + u;
+          float head = uVTp.y * exp(-pow((uu - uVTp.x) / 0.04, 2.0));
+          float inLeg = smoothstep(-0.02, 0.0, u) * smoothstep(L.w + 0.02, L.w, u);
+          float cut = 0.18 * inLeg * smoothstep(uVTp.x + 0.012, uVTp.x - 0.012, uu) * step(1e-3, uVTp.z - uVTpT.x);
+          float age = uVTp.z - (tAt + clamp(u, 0.0, L.w) / uVTpT.z);
+          float dawn = 1.0 - smoothstep(0.0, 500.0, age);
+          vAdd += head + cut;
+          tRgb += mix(uTDawn, uTWhite, exp(-pow((uu - uVTp.x) / 0.025, 2.0))) * head + uTDawn * (cut * dawn); tW += head + cut * dawn;
+        }
+      }
+      tAt += L.w / uVTpT.z + uVTpT.y; U += L.w;
+    }
+  }
+  if (uVEd > 0.0) { vMul *= 1.0 + uVEdL[rk]; vSz *= uVEdS[rk]; }   // Edit: six rings fall back, the four face-on rings gain a little
+  vTint = tW > 0.0 ? vec4(tRgb / tW, clamp(tW / (1.0 + vAdd), 0.0, 1.0)) : vec4(0.0);
 
   float dfr = length((uView * vec4(home, 1.0)).xy) - uReset.x;          // the resync ring: view-space radius from the ember
   float wave = uReset.y * exp(-dfr * dfr / (uReset.z * uReset.z));
   float grow = 1.0 + 0.3 * (ring + tap + wave) + 0.12 * A.y;
-  float size = uSizeK / max(-vp.z, 1e-3) * grow;                       // one size for all: per-particle grain clumped the tube into blobs
+  float size = uSizeK / max(-vp.z, 1e-3) * grow * vSz;                 // one size for all: per-particle grain clumped the tube into blobs
   gl_PointSize = clamp(size, 1.0, uMaxPoint);
   vFade = clamp(size * size, 0.0, 1.0) * flick;
   vec3 dp = p - uProbeRaw; float along = dot(dp, uHandDir);                  // the hand, measured across the view ray through the pointer
   float hk = 1.0 - smoothstep(0.0, 1.1 * uHand.x, length(dp - uHandDir * along)); hk *= hk * mix(1.0, uHand.y, smoothstep(-0.2, 0.2, along));
   float touch = uWake * hk;                                            // at most +1 boost; a brisk pass may put 1-3 bloom blocks over 0.8 (accepted)
-  vBoost = 1.0 + 1.5 * (ring + tap) + 0.25 * wave + sentry + touch;   // the resync ring crosses the dense limb: x0.25 keeps the wider tube to <= 3 bloom blocks
+  vBoost = (1.0 + 1.5 * (ring + tap) + 0.25 * wave + sentry + touch + vAdd) * vMul;   // the resync ring crosses the dense limb: x0.25 keeps the wider tube to <= 3 bloom blocks
   // beads: a per-grain gain, skewed g^3 (mean 0.8 on every tier), so the wide 393k tube reads as a beaded ridge, not a soft band (a
   // uniform 0.5-1.7 spread barely moved the bead contrast). 393k: 0.2-2.6; the 32-131k tiers (phones, uhd) take a milder 0.45-1.85, or
   // their few bright grains stand apart as sand in a faint body. fract(r * 61.7): a second random
   { float g = fract(r * 61.7); vBoost *= mix(uBead.x, uBead.y, g * g * g); }
+  { float zf = (uView * vec4(normalize(home), 0.0)).z; vBoost *= 1.0 - uDepthTone * (1.0 - smoothstep(-0.9, 0.2, zf)); }   // depth tone: back hemisphere dims gently
   vGrow = grow;
+  vLimb = mix(0.25, 1.0, smoothstep(0.1, 0.6, abs((uView * vec4(normalize(home), 0.0)).z)));   // 1 face-on .. 0.25 edge-on (the wide tube stacks there)
   // The ember sits inside the cage. Only particles NEARER than it cover it (alpha = coverage, read by the ember pass), soft across
   // +-split so a scattered particle crossing its depth never pops. It is also a point light: vToE the direction to it; vEk its reach,
   // a view-plane gaussian (the cage outside the halo stays silver) over a 3D falloff (at rest every strut is 1 R away; only a
@@ -151,8 +224,9 @@ void main() {
 }`;
 
 export const RENDER_FS = `
-in float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk; in vec3 vToE;
+in float vLight, vSpeed, vFade, vD2, vBuilt, vBoost, vGrow, vOcc, vEk, vLimb; in vec3 vToE; in vec4 vTint;
 uniform vec3 uColDark, uColLight, uColFast, uEmberCol, uLightView;
+uniform float uKeyWarm; uniform vec3 uTWarm;   // PROTOTYPE Key light: the lit side warms toward #FFEBD0
 uniform float uIntensity, uWrapR, uEmberLevel, uEmberLight, uEngage, uDim;
 uniform vec2 uFastRange, uBlurRange, uInvRes;
 uniform sampler2D uTrail;
@@ -166,12 +240,15 @@ void main() {
   float lit = vLight * (0.55 + 0.45 * diff);
   vec3 col = mix(uColDark, uColLight, lit);
   col = mix(col, uColFast, smoothstep(uFastRange.x, uFastRange.y, vSpeed));
+  { const vec3 Y = vec3(0.2126, 0.7152, 0.0722); float l = dot(col, Y);   // PROTOTYPE living verbs: tone of the added light, luminance kept
+    if (vTint.a > 0.0) col = mix(col, vTint.rgb * l / max(dot(vTint.rgb, Y), 1e-4), vTint.a);
+    if (uKeyWarm > 0.0) col = mix(col, uTWarm * l / max(dot(uTWarm, Y), 1e-4), uKeyWarm * diff); }
   // the ember's light on the grain's sphere: behind the ember the face we see looks at it (a lit disc, brightest at its centre); in
   // front of it only the rim that points inward catches it (a back-lit edge) and the body over the core stays cold
   col += uEmberCol * (uEmberLight * uEmberLevel * vEk * max(dot(n, vToE), 0.0));
   vec3 tr = texture(uTrail, gl_FragCoord.xy * uInvRes).rgb;
   float front = min(1.0, tr.g * 2.5 + tr.b * 0.25);                   // igloo's front channel: a bright head, x0.9 per frame, gone in ~20 frames
-  col += uColFast * (front + tr.r * 0.3);                             // the breach rim brightens the lattice; it does not scratch the ember
+  col += uColFast * (front + tr.r * 0.1 * vLimb);                     // the breach rim brightens the lattice: the tear's head at full strength everywhere, its lingering light x0.1 and quieter edge-on; it does not scratch the ember
   col += uColFast * vD2 * vD2 * 0.8;
   float a = (1.0 - 0.35 * smoothstep(uBlurRange.x, uBlurRange.y, vSpeed)) * vFade * vBuilt;   // moved particles stay visible
   a *= 1.0 - smoothstep(0.75, 1.0, r2);
@@ -210,7 +287,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
   }
   let A = mrt(), B = mrt();
   const vao = gl.createVertexArray();
-  let configured = false;
+  let configured = false, ringsSet = false;
   const ready = () => Object.values(P).every((p) => p.ready());
   function configure() {
     if (configured || !P.sim.ready()) return;
@@ -230,7 +307,7 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
   }
 
   // u: the uniforms object. rows: active prefix of the state texture.
-  function step(ratio, time, cam, fluidTex, trailTex, u, rows = H) {
+  function step(ratio, time, cam, fluidTex, trailTex, u, rows = H, verbP = null) {
     if (!ready()) return false;
     configure();
     const s = P.sim.uniforms;
@@ -251,6 +328,8 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform1f(s.uSpring, cfg.spring); gl.uniform1f(s.uAttract, cfg.attract);
     gl.uniform1f(s.uFriction, Math.pow(cfg.friction, ratio)); gl.uniform1f(s.uSpeedLerp, 1 - Math.pow(1 - cfg.speedLerp, ratio));
     gl.uniform1f(s.uWrap, cfg.wrap); gl.uniform1f(s.uBound, cfg.bound);
+    { const fl = api.flow; gl.uniform3fv(s['uFlowAx[0]'] || s.uFlowAx, fl.axes); gl.uniform3fv(s['uFlowRot[0]'] || s.uFlowRot, fl.rot); gl.uniform1i(s.uFlowN, fl.N); }
+    { const R = verbP?.resolve; gl.uniform4f(s.uVRes, R?.front || 0, R?.band || 0, R?.on || 0, R?.crest || 0); gl.uniform3fv(s.uVResA, R?.a || [0, 0, 1]); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, B.fbo);
     gl.viewport(0, 0, W, Math.max(1, Math.min(H, rows)));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -275,11 +354,24 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.uniform3f(r.uReset, u.u_resetFront.value, u.u_resetAmp.value, RESET.band);
     gl.uniform3fv(r.uColDark, opts.colDark); gl.uniform3fv(r.uColLight, opts.colLight); gl.uniform3fv(r.uColFast, opts.colFast); gl.uniform3fv(r.uEmberCol, opts.ember);
     gl.uniform3fv(r.uLightView, cam.lightView);
-    gl.uniform3fv(r.uEmberView, cam.emberView); gl.uniform3f(r.uEmberLit, EMBER_LIGHT.reach, EMBER_LIGHT.split, EMBER_LIGHT.falloff); gl.uniform1f(r.uEmberLight, EMBER_LIGHT.light);
+    const VP = opts.verbs, EM = VP?.ember;   // Key light / Spill widen the ember's reach at equal energy
+    gl.uniform3fv(r.uEmberView, cam.emberView); gl.uniform3f(r.uEmberLit, EMBER_LIGHT.reach * (EM?.reach || 1), EMBER_LIGHT.split, EMBER_LIGHT.falloff); gl.uniform1f(r.uEmberLight, EMBER_LIGHT.light * (EM?.light ?? 1));
+    if (VP) {   // living verbs
+      if (!ringsSet) { gl.uniform3fv(r['uRingN[0]'] || r.uRingN, opts.rings.n); gl.uniform3fv(r['uRingE1[0]'] || r.uRingE1, opts.rings.e1); gl.uniform3fv(r['uRingE2[0]'] || r.uRingE2, opts.rings.e2);
+        gl.uniform3fv(r.uTGlint, opts.tones.glint); gl.uniform3fv(r.uTWhite, opts.tones.white); gl.uniform3fv(r.uTDawn, opts.tones.dawn); gl.uniform3fv(r.uTWarm, opts.tones.warm); ringsSet = true; }
+      const Rv = VP.resolve, A = VP.aperture, C = VP.compose, T = VP.toolpath, E = VP.edit;
+      gl.uniform4f(r.uVRes, Rv.front, Rv.band, Rv.on, Rv.crest); gl.uniform3fv(r.uVResA, Rv.a);
+      gl.uniform4f(r.uVAp, A.radius, A.light, A.att, A.on);
+      gl.uniform4fv(r['uVCo[0]'] || r.uVCo, C.edges); gl.uniform4f(r.uVCoB, C.bleed, 0.35, C.on, C.n);
+      gl.uniform4fv(r['uVTpL[0]'] || r.uVTpL, T.legs); gl.uniform4f(r.uVTp, T.s, T.head, T.tau, T.on); gl.uniform4f(r.uVTpT, T.plunge, T.dwell, T.feed, T.n);
+      gl.uniform1fv(r['uVEdL[0]'] || r.uVEdL, E.light); gl.uniform1fv(r['uVEdS[0]'] || r.uVEdS, E.size); gl.uniform1f(r.uVEd, E.on);
+      gl.uniform1f(r.uKeyWarm, VP.key.warm);
+    } else { gl.uniform4f(r.uVRes, 0, 0, 0, 0); gl.uniform4f(r.uVAp, 0, 0, 0, 0); gl.uniform4f(r.uVCoB, 0, 0, 0, 0); gl.uniform4f(r.uVTp, 0, 0, 0, 0); gl.uniform1f(r.uVEd, 0); gl.uniform1f(r.uKeyWarm, 0); }
     gl.uniform1f(r.uIntensity, opts.intensity); gl.uniform1f(r.uWrapR, cfg.wrap); gl.uniform1f(r.uEmberLevel, opts.emberLevel);
     gl.uniform1f(r.uEngage, u.u_engage.value); gl.uniform1f(r.uDim, u.u_dim.value);
     { const bd = opts.bead || [0.2, 2.6]; gl.uniform2f(r.uBead, bd[0], bd[1]); }
     gl.uniform2fv(r.uFastRange, cfg.fastRange); gl.uniform2fv(r.uBlurRange, cfg.blurRange); gl.uniform2f(r.uInvRes, opts.invRes[0], opts.invRes[1]);
+    { const fl = api.flow; gl.uniform3fv(r['uFlowAx[0]'] || r.uFlowAx, fl.axes); gl.uniform3fv(r['uFlowRot[0]'] || r.uFlowRot, fl.rot); gl.uniform1i(r.uFlowN, fl.N); gl.uniform1f(r.uDepthTone, FLOW.depth); }
     // colour adds; alpha (the near-layer coverage the ember reads) accumulates as 1 - prod(1 - a): bounded in [0, 1], order-free,
     // so the ember's 5-tap blur is a real penumbra instead of a dilation of saturated sums
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -289,9 +381,11 @@ export function createParticles(gl, caps, { noiseSrc, sdfSrc, side = [256, 256],
     gl.disable(gl.BLEND);
   }
 
-  return {
+  const api = {
+    flow: null,
     cfg, ready, reset, step, draw, programs: P, count: W * H, side,
     get mrtOk() { return A.ok && B.ok; },
     dispose() { [homeTex, A.off, A.vel, A.aux, B.off, B.vel, B.aux].forEach((t) => gl.deleteTexture(t)); gl.deleteFramebuffer(A.fbo); gl.deleteFramebuffer(B.fbo); gl.deleteVertexArray(vao); Object.values(P).forEach((p) => gl.deleteProgram(p.program)); },
   };
+  return api;
 }

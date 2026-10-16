@@ -12,6 +12,7 @@ import sdfSrc from './glsl/sdf.glsl?raw';
 import trailSrc from './glsl/trail.glsl?raw';
 import emberSrc from './glsl/ember.glsl?raw';
 import compositeSrc from './glsl/composite.glsl?raw';
+import { TONES } from './verbs.js';
 
 // "GL or Canvas2D" is decided on a scratch canvas: a canvas that has handed out a WebGL context can never give a 2D one.
 export function probeGPU() {
@@ -67,8 +68,8 @@ const HAIRLINE_HDR = 0.035;
 // above it a doubled count keeps v1's chunky, bright points and adds ~40 % light (sqrt law), read as thicker tubes.
 const countGain = (count) => { const k = 131072 / Math.max(1, count); return k >= 1 ? Math.min(4, k) : Math.sqrt(k); };
 
-export function emberLevel(u, t) {
-  return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * u.u_warm.value)
+export function emberLevel(u, t, verbWarm = 0) {   // verbWarm: Spill (Creative production B) reads as u_warm
+  return u.u_ember.value * Math.min(1.6, 1 + u.u_boostPress.value + u.u_boostGreet.value + 0.2 * u.u_engage.value + 0.4 * u.u_open.value + 0.2 * Math.max(u.u_warm.value, verbWarm))
     * (1 - 0.15 * u.u_tear.value) * (1 + 0.05 * Math.sin(1.9 * t) * u.u_idle.value);
 }
 
@@ -80,12 +81,15 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   if (!caps.rgba16f || !caps.rg16f || caps.maxDrawBuffers < 3) return null;
 
   const fluid = createFluid(gl, caps, { simRes: tier.fluidRes, pressureIterations: tier.jacobi, curl: 0, velocityDecay: 0.98, splatRadius: 0.14, splatGain: 1.0, maxSplatGapMs: 150 });
-  let particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: tier.state32 && caps.rgba32f, homes: shape.homes, latticeRotT: shape.rotT, shape: shape.shapeId });
+  const packed = shape.homes.slice();
+  for (let i = 0; i < packed.length / 4; i++) packed[i * 4 + 3] = shape.ring[i] + Math.min(packed[i * 4 + 3], 0.99999);   // exact ring index in int(w), random in fract(w)
+  let particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: tier.state32 && caps.rgba32f, homes: packed, latticeRotT: shape.rotT, shape: shape.shapeId });
   if (!particles.mrtOk && tier.state32) {
     particles.dispose();
-    particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: false, homes: shape.homes, latticeRotT: shape.rotT, shape: shape.shapeId });
+    particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: false, homes: packed, latticeRotT: shape.rotT, shape: shape.shapeId });
   }
   if (!particles.mrtOk) return null;
+  particles.flow = model.flow;
   const bloom = createBloom(gl, caps, { levels: tier.bloomLevels, threshold: 0.8, smoothing: 0.03, radius: 0.85 });   // only the ember (HDR 3.0) blooms
   const trailP = createProgram(gl, caps, FULLSCREEN_VS, trailSrc);
   const emberP = createProgram(gl, caps, FULLSCREEN_VS, emberSrc);
@@ -137,6 +141,8 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   let gainS = -1, lightS = -1;   // a row-shed removes half the points in one frame: smooth the TOTAL light (count x gain), so the survivors carry it down over ~0.6 s
+  const verbs = model.verbs, ringsU = verbs ? { n: verbs.ringN, e1: verbs.ringE1, e2: verbs.ringE2 } : null;
+  const verbWarm = () => (verbs ? verbs.params(model.time).ember.warm : 0);
   function drawOpts(time) {
     const cam = model.cam, count = rows * tier.side[0];
     const rPx = cam.shellPx.r * hdrScale;
@@ -145,7 +151,8 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
       sizeK: particles.cfg.sizePx * (rPx / 135) * cam.dist * (tier.mobile ? 1.15 : 1),
       intensity: particles.cfg.intensity * (gainS >= 0 ? gainS : countGain(count)),
       bead: count >= 262144 ? [0.2, 2.6] : [0.45, 1.85],   // the beads' range (RENDER_VS): skewed at 393k, milder on the 32-131k tiers (same mean 0.8)
-      emberLevel: emberLevel(uniforms, time), ...colors,
+      emberLevel: emberLevel(uniforms, time, verbWarm()), ...colors,
+      verbs: verbs?.active() ? verbs.params(model.time) : null, rings: ringsU, tones: TONES,
     };
   }
 
@@ -179,13 +186,29 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform1i(p.uPrevHdr, bindTex(gl, 0, prev.texture)); gl.uniform1i(p.uTrail, bindTex(gl, 1, trail.read.texture));
     gl.uniform2f(p.uEmberPx, ex, ey); gl.uniform1f(p.uEmberR, er);
     gl.uniform3fv(p.uEmberCol, colors.ember); gl.uniform3fv(p.uEmberHot, colors.hot);
-    gl.uniform1f(p.uLevel, emberLevel(u, time)); gl.uniform1f(p.uFlicker, 0.08 * (1 - u.u_build.value));
-    gl.uniform1f(p.uWarmMix, u.u_warm.value); gl.uniform1f(p.uTime, time % 1000); gl.uniform2f(p.uInvRes, 1 / W, 1 / H);
+    gl.uniform1f(p.uLevel, emberLevel(u, time, verbWarm())); gl.uniform1f(p.uFlicker, 0.08 * (1 - u.u_build.value));
+    gl.uniform1f(p.uWarmMix, Math.max(u.u_warm.value, verbWarm())); gl.uniform1f(p.uTime, time % 1000); gl.uniform2f(p.uInvRes, 1 / W, 1 / H);
     gl.uniform2f(p.uOcc, EMBER_LIGHT.occCore, EMBER_LIGHT.occHalo);
     gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, x1 - x0, y1 - y0);
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.BLEND); gl.disable(gl.SCISSOR_TEST);
+  }
+
+  // HDR read-back of the shell's box: 4x4 blocks (mean luma, linear) over 0.8 in the 0.5-1.2 R annulus, and the largest block.
+  function hdrProbe(target, cam) {
+    const sc = hdrScale, cx = cam.shellPx.x * sc, cy = cam.shellPx.y * sc, R = cam.shellPx.r * sc;
+    const x0 = Math.max(0, Math.floor((cx - 1.25 * R) / 4) * 4), y0 = Math.max(0, Math.floor((cy - 1.25 * R) / 4) * 4);
+    const w = Math.min(W - x0, Math.ceil(2.5 * R / 4) * 4), h = Math.min(H - y0, Math.ceil(2.5 * R / 4) * 4), buf = new Float32Array(w * h * 4);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.fbo); gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, buf); gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    let over = 0, max = 0, maxIn = 0;
+    for (let by = 0; by + 4 <= h; by += 4) for (let bx = 0; bx + 4 <= w; bx += 4) {
+      let L = 0; for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const i = ((by + y) * w + bx + x) * 4; L += 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]; }
+      L /= 16; const r = Math.hypot(x0 + bx + 2 - cx, y0 + by + 2 - cy) / R;
+      if (r >= 0.5 && r <= 1.2) { if (L > 0.8) over++; if (L > maxIn) maxIn = L; }
+      if (L > max) max = L;
+    }
+    window.__hdrStats = { over, maxIn, max };
   }
 
   function composite(cur, bloomTex, cam, u) {
@@ -215,7 +238,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
       stillSeeded = false;
       if (dtMs > 0) {
         if (s.simulate) { fluid.step(dt); stepTrail(ratio); } else model.trail.pressDisc = false;
-        particles.step(ratio, time, cam, fluid.texture, trail.read.texture, u, rows);
+        particles.step(ratio, time, cam, fluid.texture, trail.read.texture, u, rows, verbs?.active() ? verbs.params(model.time) : null);
       }
     }
     const count = rows * tier.side[0], light = count * countGain(count);
@@ -237,6 +260,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
       }
     }
     drawEmber(prev, cam, u, time);
+    if (view.readout && window.__hdrProbe) hdrProbe(cur, cam);
     const bloomTex = bloom.render(cur.texture, W, H) || cur.texture;
     composite(cur, bloomTex, cam, u);
     hdrIndex ^= 1;

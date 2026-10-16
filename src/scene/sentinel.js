@@ -7,6 +7,7 @@ import { probeGPU, createWebGLRenderer } from './webgl.js';
 import { watchContext } from './gl.js';
 import { LATTICE } from './constants.js';
 import { createGpuTimer, createFenceLag } from './govsignal.js';
+import { createVerbs } from './verbs.js';
 
 // Tier table (start values). side = state texture size allocated once; rows = active prefix (no reallocation).
 // Backing caps are high so hi-DPI screens get native-resolution particles (low caps upscale into blur); the
@@ -29,7 +30,7 @@ function pickTier(probe, override, force) {
   return TIERS.xe;
 }
 
-export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout = false, readouts = null, instrument = null } = {}) {
+export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout = false, readouts = null, instrument = null, verbs = null } = {}) {
   // Test parameters (gl, tier, shape, fx, quality) exist only in development and test builds, like ?debug; ?still only lightens the page.
   const query = new URLSearchParams(location.search);
   const params = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1' ? query : new URLSearchParams(query.has('still') ? 'still' : '');
@@ -40,6 +41,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const count = tier.name === 'c2d' ? 4096 : tier.side[0] * tier.side[1];
   const shape = createShape({ count, set });
   const model = createModel(shape, uniforms);
+  if (verbs?.on) model.verbs = createVerbs({ mobile: tier.mobile, spill: !!verbs.spill });   // PROTOTYPE living verbs (both renderers read model.verbs)
   const labels = createLabels(readouts, instrument, shape);
   const flags = new Set((params.get('fx') || '').split(',').filter(Boolean));
   const view = { anchorX: 0, anchorY: 0, anchorH: 1, width: 1, height: 1, time: 0, debug, readout };

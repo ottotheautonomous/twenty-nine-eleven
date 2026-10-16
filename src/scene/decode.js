@@ -12,7 +12,7 @@
 //
 // Motion v14 note: motion.dev's own ScrambleText is a paid Motion+ component;
 // this is a small free equivalent on the public API (animate, frame, cancelFrame).
-import { animate, frame, cancelFrame } from 'motion';
+import { animate, frame, cancelFrame, cubicBezier } from 'motion';
 
 export const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_:.';
 const SINE_OUT = [0.61, 1, 0.88, 1];   // easeOutSine as cubic-bezier (easings.net)
@@ -55,6 +55,24 @@ export function prepareDecode(el, { lockWidth = false } = {}) {
   return (el.__decode = { el, chars, controls: [], render: null, gen: 0 });
 }
 
+// One frame of the glyph function for progress pA (alpha sweep, linear) and pS (scramble, eased), both 0..1.
+// exact: compare an opacity with the last one written rather than the CSSOM's 6-digit serialization, so a clocked
+// glyph always holds exactly the value for its t (no carry-over from the frame before).
+function paintChars(st, pA, pS, { n, useAlpha, fraction, glyphs, steps, exact = false }) {
+  for (let i = 0; i < n; i++) {
+    const c = st.chars[i];
+    const w = n > 1 ? i / n : 0;
+    const alpha = Math.min(Math.max((pA * 1.1 - w) / 0.1, 0), 1);
+    const local = Math.min(Math.max(pS * 2 - w, 0), 1);
+    const g = c.space || c.locked || local >= 1 || c.roll >= fraction ? c.final : glyphs[(c.seed + Math.floor((1 - local) * steps)) % glyphs.length];
+    if (g !== c.shown) { c.el.textContent = g; c.shown = g; }
+    if (!useAlpha) continue;
+    const op = String(alpha);
+    if (exact) { if (c.op !== op) { c.op = op; c.el.style.opacity = op; } }
+    else if (c.el.style.opacity !== op) c.el.style.opacity = op;
+  }
+}
+
 export function decode(el, {
   duration = 0.75, alphaDuration = 0.4, delay = 0, ease = SINE_OUT,
   steps = 5.75, glyphs = GLYPHS, lockWidth = false, reduced = reducedMotion(), fraction = 1,
@@ -67,22 +85,13 @@ export function decode(el, {
   const gen = ++st.gen;                  // stale completions from an earlier call are ignored
   const n = st.chars.length, useAlpha = alpha;
   const p = { a: useAlpha ? 0 : 1, s: 0 };
+  const cfg = { n, useAlpha, fraction, glyphs, steps };
   let dirty = true;
 
   const paint = () => {
     if (!dirty) return;
     dirty = false;
-    for (let i = 0; i < n; i++) {
-      const c = st.chars[i];
-      const w = n > 1 ? i / n : 0;
-      const alpha = Math.min(Math.max((p.a * 1.1 - w) / 0.1, 0), 1);
-      const local = Math.min(Math.max(p.s * 2 - w, 0), 1);
-      const g = c.space || c.locked || local >= 1 || c.roll >= fraction ? c.final : glyphs[(c.seed + Math.floor((1 - local) * steps)) % glyphs.length];
-      if (g !== c.shown) { c.el.textContent = g; c.shown = g; }
-      if (!useAlpha) continue;
-      const op = String(alpha);
-      if (c.el.style.opacity !== op) c.el.style.opacity = op;
-    }
+    paintChars(st, p.a, p.s, cfg);
   };
 
   if (reduced) {                         // composed still: final text, no motion
@@ -110,6 +119,26 @@ export function stopDecode(el, { complete = true } = {}) {
   st.controls.forEach((c) => (complete ? c.complete() : c.stop()));
   st.controls = [];
   if (st.render) { cancelFrame(st.render); st.render = null; }
+}
+
+// paint(t) applies the state for t seconds along the entrance timeline (delay, then duration). It is idempotent and
+// pure in (t, seeds), so t run backwards is the exact reverse of t run forwards, letter for letter. T is the
+// timeline's length. No frame loop of its own: the caller paints from its clock. Nothing else may drive these glyphs
+// while a clock owns them (a decode() in flight yields here; its stale completion is ignored).
+export function prepareClockedDecode(el, {
+  duration = 0.75, alphaDuration = 0.4, delay = 0, ease = SINE_OUT, steps = 5.75, glyphs = GLYPHS, lockWidth = false,
+  fraction = 1, alpha = true, lock = null, reseed = true,
+} = {}) {
+  const st = prepareDecode(el, { lockWidth });
+  stopDecode(el, { complete: false }); st.gen++;
+  if (reseed) st.chars.forEach((c, i) => { c.seed = (Math.random() * 997) | 0; c.roll = Math.random(); c.locked = lock ? lock(c.final, i) : false; });
+  st.chars.forEach((c) => { c.op = undefined; });
+  const easeFn = typeof ease === 'function' ? ease : cubicBezier(...ease);
+  const cfg = { n: st.chars.length, useAlpha: alpha, fraction, glyphs, steps, exact: true };
+  const clamp01 = (x) => Math.min(Math.max(x, 0), 1);
+  const T = delay + Math.max(duration, alpha ? alphaDuration : 0);
+  const paint = (t) => { const tl = t - delay; paintChars(st, alpha ? clamp01(tl / alphaDuration) : 1, easeFn(clamp01(tl / duration)), cfg); };
+  return { el, T, paint, chars: st.chars };
 }
 
 // Lines: stagger 0.15-0.2 s, e.g.
