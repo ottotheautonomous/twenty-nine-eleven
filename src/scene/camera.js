@@ -1,10 +1,10 @@
 import { perspective, lookAt, multiply, invert } from './mat4.js';
 import { pointerRay } from './plexus.js';
-import { FOV, KEY, EMBER } from './constants.js';
+import { FOV, KEY, EMBER, FORM, DBG } from './constants.js';
 
 export function createCameraState() {
   return { view: new Float32Array(16), proj: new Float32Array(16), viewProj: new Float32Array(16), inv: new Float32Array(16),
-    right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1], lightDir: KEY.slice(), lightView: [0, 0, 1], eye: [0, 0, 10], dist: 10,
+    right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1], lightDir: KEY.slice(), lightView: [0, 0, 1], eye: [0, 0, 10], dist: 10, fov: FOV, d0: 10,
     shellPx: { x: 0, y: 0, r: 1 }, emberPx: [0, 0], emberView: [0, 0, -10], emberR: 1, guardY: 0, hazePx: [0, 0], ready: false };
 }
 
@@ -18,13 +18,19 @@ const mulDir = (m, d) => {
 export function computeCamera(out, u, view, orbit, probeS) {
   const height = Math.max(1, view.height), width = Math.max(1, view.width), anchorH = Math.max(1, view.anchorH);
   const R_px = anchorH / 2;
-  const tanHalf = Math.tan(FOV / 2);
-  const D0 = (height / anchorH) / tanHalf;                       // distance at which the unit sphere spans anchorH px
+  let tanHalf = Math.tan(FOV / 2);
+  let D0 = (height / anchorH) / tanHalf;                         // distance at which the unit sphere spans anchorH px (round one's telephoto)
+  out.d0 = D0;                                                   // this layout's own distance (the lab's Perspective readout)
+  if (FORM.dist > 1.5 && FORM.dist < D0) {                       // FORM perspective: a nearer camera, the FOV widened so the silhouette is identical
+    const s0 = 1 / (tanHalf * Math.sqrt(D0 * D0 - 1));           // the silhouette's NDC radius, 1 / (tan(fov/2) sqrt(D^2 - 1)), held at round one's value
+    D0 = FORM.dist; tanHalf = 1 / (s0 * Math.sqrt(D0 * D0 - 1));
+  }
+  out.fov = 2 * Math.atan(tanHalf);
   const dist = D0 * (1 + 0.25 * u.u_entry.value + 0.45 * u.u_dolly.value) * (1 - 0.06 * u.u_vel.value) * (1 - 0.15 * u.u_tier0.value);
-  const { yaw, pitch } = orbit;
+  const { pitch } = orbit, yaw = DBG && FORM.spin ? orbit.yaw + FORM.spin * Math.PI / 180 * (view.time || 0) : orbit.yaw;   // test builds: ?spin=<deg/s>, the flip test's orbit
   const eye = [Math.sin(yaw) * Math.cos(pitch) * dist, Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist];
   lookAt(out.view, eye, [0, 0, 0], [0, 1, 0]);
-  perspective(out.proj, FOV, width / height, 0.1, Math.max(100, dist * 4));
+  perspective(out.proj, out.fov, width / height, 0.1, Math.max(100, dist * 4));
   // Off-centre projection: put the sphere's centre on the DOM anchor without skewing it.
   const ndcX = (view.anchorX / width) * 2 - 1, ndcY = 1 - (view.anchorY / height) * 2;
   out.proj[8] = -ndcX; out.proj[9] = -ndcY;

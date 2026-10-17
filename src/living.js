@@ -1,6 +1,7 @@
-// The living layer (LIVING-SPEC.md, .review/living/lead/). PROTOTYPE on branch living-proto-dom: throwaway, behind ?living=<flags>.
-// Flags: exits | lamp or wake | swell or breath (+ halo) | drop | blink or clickdrop. "all" = exits,swell,lamp,drop,blink (the A set).
-// No flags = the page exactly as a004993 (nothing created, no attribute set, no frame requested).
+// The living layer (LIVING-SPEC.md, .review/living/lead/). Shipped in v1.5; main.js turns it on by default with the flags
+// exits,swell,drop,blink (+ the row-2 verbs), the cursor lamp benched (owner, 2026-10-16: fine-tune later). Flags: exits | lamp or
+// wake | swell or breath (+ halo) | drop | blink or clickdrop; "all" = exits,swell,lamp,drop,blink (the A set). ?living=<flags> (test
+// builds only) picks others; no flags = nothing created, no attribute set, no frame requested.
 //
 // One page clock phi (the ember's breath, 1.9 rad/s), one material (dust.js), one loop (Motion's frame batch, with the scene).
 // Overlay pieces (lamp, wake, drop, click) draw into ONE small Canvas2D window (408 CSS px) that rides the light by transform.
@@ -12,6 +13,7 @@ const PHI = 1.9;                                  // rad/s: the ember's breath, 
 const CYCLE = (TAU / PHI) * 1000;
 const easeOut = cubicBezier(0.22, 1, 0.36, 1), easeIn = cubicBezier(0.64, 0, 0.78, 0), easeWave = cubicBezier(0.16, 1, 0.3, 1), easeSine = cubicBezier(0.37, 0, 0.63, 1);
 const WIN = 408, HALF = WIN / 2;                  // the overlay window (CSS px): the afterglow's 180 px + its 24 px feather, each side
+const DROP_EXT = 50, WIN_STEP = 64;               // a drop's reach (rings to 44 px + spread + grain); the window grows in 64 px steps
 const CELL = 40, JIT = 14, TETHER = 8;            // the dust field: one grain per 40 x 40 cell, jittered +-14, drifting within +-8 of home
 const SOFT = { k: 95, c: 23 };                    // the wordmark visitor light's spring (main.js soft): the lamp is that light
 
@@ -46,7 +48,7 @@ export function createLiving({ flags, scene, anchor, sentinel, gainK = 1 }) {
   const stats = { ticks: 0, draws: 0, ms: [], lineMs: [] };
 
   let run = false, lineRun = false, awake = false, level = 0, levelAt = -1e9, geo = null, boxesAt = -1e9;
-  let canvas = null, ctx = null, spr = null, winX = 0, winY = 0, winShown = false;
+  let canvas = null, ctx = null, spr = null, winX = 0, winY = 0, winW = WIN, winH = WIN, winShown = false;
   let px = null, py = null, ptype = 'mouse', lastInput = -1e9, lastT = 0;
   const touches = new Set(); let multi = false, lastDrop = null;
 
@@ -114,9 +116,9 @@ export function createLiving({ flags, scene, anchor, sentinel, gainK = 1 }) {
     sizeCanvas();
   }
   function sizeCanvas() {
-    const b = Math.round(WIN * geo.s);
-    if (canvas.width !== b) { canvas.width = canvas.height = b; }
-    canvas.style.width = canvas.style.height = `${WIN}px`;   // CSSOM only (the build's CSP is style-src 'self')
+    const bw = Math.round(winW * geo.s), bh = Math.round(winH * geo.s);
+    if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+    canvas.style.width = `${winW}px`; canvas.style.height = `${winH}px`;   // CSSOM only (the build's CSP is style-src 'self')
   }
 
   function wake() {
@@ -205,22 +207,31 @@ export function createLiving({ flags, scene, anchor, sentinel, gainK = 1 }) {
     if (!alive || !run && !drops.length && !lit.size && gain <= 0) { hideWindow(); return Boolean(alive); }
     if (now - boxesAt > 400) readBoxes(now);
 
-    // the window rides the lamp (or the pointer for the wake, or the newest drop)
-    const cx = has('lamp') && (lamp.on || lit.size) ? lamp.x : has('wake') && lamp.on ? (px ?? lamp.x) : drops.length ? drops.at(-1).x : lamp.x;
-    const cy = has('lamp') && (lamp.on || lit.size) ? lamp.y : has('wake') && lamp.on ? (py ?? lamp.y) : drops.length ? drops.at(-1).y : lamp.y;
+    // the window covers every live effect (the lamp or the wake +-204 px, each drop +-50 px), capped to the viewport and grown in 64 px
+    // steps: a second tap far from the first no longer drags the window off the first drop and cuts its fade (DOM review 2.1)
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const cover = (x, y, e) => { x0 = Math.min(x0, x - e); y0 = Math.min(y0, y - e); x1 = Math.max(x1, x + e); y1 = Math.max(y1, y + e); };
+    if (has('lamp') && (lamp.on || lit.size)) cover(lamp.x, lamp.y, HALF);
+    else if (has('wake') && lamp.on) cover(px ?? lamp.x, py ?? lamp.y, HALF);
+    for (const dr of drops) cover(dr.x, dr.y, DROP_EXT);
+    if (x0 === Infinity) cover(lamp.x, lamp.y, HALF);
+    const vw = document.documentElement.clientWidth || innerWidth, vh = document.documentElement.clientHeight || innerHeight;
+    x0 = Math.max(x0, 0); y0 = Math.max(y0, 0); x1 = Math.max(x0 + 1, Math.min(x1, vw)); y1 = Math.max(y0 + 1, Math.min(y1, vh));
     ensureCanvas();
     const snap = (v) => Math.round(v * geo.dpr) / geo.dpr;
-    winX = snap(cx - HALF); winY = snap(cy - HALF);
+    winX = snap(x0); winY = snap(y0);
+    const ww = Math.ceil((x1 - winX) / WIN_STEP) * WIN_STEP, wh = Math.ceil((y1 - winY) / WIN_STEP) * WIN_STEP;
+    if (ww !== winW || wh !== winH) { winW = ww; winH = wh; sizeCanvas(); }
     canvas.style.transform = `translate3d(${winX}px, ${winY}px, 0)`;
     if (!winShown) { canvas.hidden = false; winShown = true; }
     const s = geo.s;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = 'lighter';
     ctx.setTransform(s, 0, 0, s, -winX * s, -winY * s);
-    const near = boxes.filter((b) => b[2] > winX - 12 && b[0] < winX + WIN + 12 && b[3] > winY - 12 && b[1] < winY + WIN + 12);
+    const near = boxes.filter((b) => b[2] > winX - 12 && b[0] < winX + winW + 12 && b[3] > winY - 12 && b[1] < winY + winH + 12);
     const tsec = now / 1000, phi = PHI * tsec, d0 = geo.d;
     const draw = (x, y, a, size, tone, glint = 0) => {
-      if (x < winX || x > winX + WIN || y < winY || y > winY + WIN) return;
+      if (x < winX || x > winX + winW || y < winY || y > winY + winH) return;
       for (let k = 0, w = 1 - glint; k < 2; k++, w = glint) if (a * w > 0.003) {
         ctx.globalAlpha = Math.min(1, a * w); ctx.drawImage(spr[k ? 6 : tone], x - size / 2, y - size / 2, size, size);
         if (DEBUG) stats.draws++;
@@ -463,7 +474,7 @@ export function createLiving({ flags, scene, anchor, sentinel, gainK = 1 }) {
     api.debug = {
       state: () => ({ run, lineRun, awake, level, lamp: { x: lamp.x, y: lamp.y, on: lamp.on, mode: lamp.mode, gain: lamp.gain.value(performance.now()) }, lit: lit.size, drops: drops.length,
         motes: motes.map((m) => [m.x, m.y]), lines: [...lines.values()].map((s) => ({ t: s.el.textContent.trim().slice(0, 20), active: s.active, sw: s.sw, written: { ...s.written } })),
-        canvas: Boolean(canvas), hidden: canvas ? canvas.hidden : true, win: [winX, winY], ticks: stats.ticks, draws: stats.draws }),
+        canvas: Boolean(canvas), hidden: canvas ? canvas.hidden : true, win: [winX, winY], winSize: [winW, winH], ticks: stats.ticks, draws: stats.draws }),
       stats: () => { const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * p))] : 0; }; return { ticks: stats.ticks, draws: stats.draws, p50: q(stats.ms, 0.5), p95: q(stats.ms, 0.95), max: q(stats.ms, 1), lineP95: q(stats.lineMs, 0.95), n: stats.ms.length }; },
       reset: () => { stats.ticks = stats.draws = 0; stats.ms.length = 0; stats.lineMs.length = 0; },
     };

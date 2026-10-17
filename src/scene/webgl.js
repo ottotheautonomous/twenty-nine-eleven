@@ -4,11 +4,11 @@ import { createParticles } from './particles.js';
 import { createBloom } from './bloom.js';
 import { loadBlueNoise, blueNoiseOffset } from './bluenoise.js';
 import { createPlexusRenderer } from './plexus.js';
+import { createGlyphs } from './glyphs.js';
 import { frameRatio } from './damp.js';
-import { COLORS, NODES, RESET, EMBER_LIGHT, hexRGB, linearRGB } from './constants.js';
+import { COLORS, NODES, RESET, EMBER, EMBER_LIGHT, LAG, GLYPHS, DBG, hexRGB, linearRGB } from './constants.js';
 import bnUrl from './bn64-rgb.png?url';
 import noiseSrc from './glsl/noise.glsl?raw';
-import sdfSrc from './glsl/sdf.glsl?raw';
 import trailSrc from './glsl/trail.glsl?raw';
 import emberSrc from './glsl/ember.glsl?raw';
 import compositeSrc from './glsl/composite.glsl?raw';
@@ -73,29 +73,34 @@ export function emberLevel(u, t, verbWarm = 0) {   // verbWarm: Spill (Creative 
     * (1 - 0.15 * u.u_tear.value) * (1 + 0.05 * Math.sin(1.9 * t) * u.u_idle.value);
 }
 
-export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags = new Set() }) {
+export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe }) {
   let ctx = null;
   try { ctx = createGL(canvas, { powerPreference: tier.mobile ? 'default' : 'high-performance' }); } catch { ctx = null; }
   if (!ctx) return null;
   const { gl, caps } = ctx;
-  if (!caps.rgba16f || !caps.rg16f || caps.maxDrawBuffers < 3) return null;
+  if (!caps.rgba16f || !caps.rg16f || !caps.maxDrawBuffers || caps.maxDrawBuffers < 3) return null;
 
-  const fluid = createFluid(gl, caps, { simRes: tier.fluidRes, pressureIterations: tier.jacobi, curl: 0, velocityDecay: 0.98, splatRadius: 0.14, splatGain: 1.0, maxSplatGapMs: 150 });
+  const fluid = createFluid(gl, caps, { simRes: tier.fluidRes, pressureIterations: tier.jacobi, curl: 0, velocityDecay: 0.96, splatRadius: 0.14, splatGain: 1.0, maxSplatGapMs: 150 });
   const packed = shape.homes.slice();
   for (let i = 0; i < packed.length / 4; i++) packed[i * 4 + 3] = shape.ring[i] + Math.min(packed[i * 4 + 3], 0.99999);   // exact ring index in int(w), random in fract(w)
-  let particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: tier.state32 && caps.rgba32f, homes: packed, latticeRotT: shape.rotT, shape: shape.shapeId });
+  let particles = createParticles(gl, caps, { noiseSrc, side: tier.side, state32: tier.state32 && caps.rgba32f, homes: packed });
   if (!particles.mrtOk && tier.state32) {
     particles.dispose();
-    particles = createParticles(gl, caps, { noiseSrc, sdfSrc, side: tier.side, state32: false, homes: packed, latticeRotT: shape.rotT, shape: shape.shapeId });
+    particles = createParticles(gl, caps, { noiseSrc, side: tier.side, state32: false, homes: packed });
   }
   if (!particles.mrtOk) return null;
   particles.flow = model.flow;
+  if (DBG && EMBER_LIGHT.simTube) particles.cfg.tube = EMBER_LIGHT.simTube;   // ?eclipse=raw (constants.js): the owner's link as 3114 drew it
   const bloom = createBloom(gl, caps, { levels: tier.bloomLevels, threshold: 0.8, smoothing: 0.03, radius: 0.85 });   // only the ember (HDR 3.0) blooms
   const trailP = createProgram(gl, caps, FULLSCREEN_VS, trailSrc);
   const emberP = createProgram(gl, caps, FULLSCREEN_VS, emberSrc);
   const compP = createProgram(gl, caps, FULLSCREEN_VS, compositeSrc);
   const plexus = createPlexusRenderer(gl, caps, createProgram, model.plexus);
   const classNodes = createClassNodes(gl, caps, shape);
+  const colors = { colDark: linearRGB(COLORS.shadow), colLight: linearRGB(COLORS.hi), colFast: linearRGB(COLORS.rim), ember: linearRGB(COLORS.ember), hot: linearRGB(COLORS.hot) };
+  const glyphs = GLYPHS.on ? createGlyphs(gl, { mobile: tier.mobile, set: shape.set }) : null;   // the glyph haze (WebGL tiers only)
+  let glyphAmp = 0;
+  let shield = null;   // test builds only (?shield=1): attachShield(module) builds Argon's shield renderer on demand; its program never gates ready()
   const programs = [trailP, emberP, compP, plexus.program, classNodes.program, ...Object.values(fluid.programs), ...Object.values(particles.programs), ...Object.values(bloom.programs)];
 
   // Dither: a flat 1x1 until the blue-noise PNG arrives.
@@ -106,12 +111,13 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   loadBlueNoise(gl, bnUrl).then((b) => { if (!gl.isContextLost()) blue = b; }).catch(() => {});
 
   const hdrFmt = { internalFormat: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR };
-  const colors = { colDark: linearRGB(COLORS.shadow), colLight: linearRGB(COLORS.hi), colFast: linearRGB(COLORS.rim), ember: linearRGB(COLORS.ember), hot: linearRGB(COLORS.hot) };
   const srgb = { ink: hexRGB(COLORS.ink), haze: hexRGB(COLORS.haze), slate: hexRGB(COLORS.slate), accent: hexRGB(COLORS.ember) };
+  const glyphCol = hexRGB(COLORS.mid), glyphWarm = glyphCol.map((c, i) => c + (hexRGB(COLORS.ember)[i] - c) * GLYPHS.warm);
   const inkLinear = linearRGB(COLORS.ink);
   let W = 1, H = 1, hdr = [null, null], hdrIndex = 0, trail = null, rows = tier.rowsStart, stillSeeded = false, seedBuild = -1, lastError = 0, lastErrorAt = 0;
   let hdrScale = tier.hdrScale, lastW = 1, lastH = 1, forceRealloc = false;
   const bnOffset = [0, 0];
+  let hazeReady = false, hazeX = 0, hazeY = 0;
 
   function resize(width, height) {
     lastW = width; lastH = height;
@@ -128,6 +134,7 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     trail?.dispose(); trail = createPair(gl, tw, th, hdrFmt);
     bloom.resize(W, H);
     stillSeeded = false;
+    hazeReady = false;
   }
   const ok = () => programs.every((p) => p.ready());
   let warmed = false;
@@ -146,11 +153,13 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
   function drawOpts(time) {
     const cam = model.cam, count = rows * tier.side[0];
     const rPx = cam.shellPx.r * hdrScale;
+    const beadHi = DBG && particles.cfg.beadHi ? particles.cfg.beadHi : (count >= 262144 ? 2.6 : 1.85);
+    const beadLo = count >= 262144 ? 0.2 : 0.45;
     return {
       trail: trail.read.texture, time, invRes: [1 / W, 1 / H],
       sizeK: particles.cfg.sizePx * (rPx / 135) * cam.dist * (tier.mobile ? 1.15 : 1),
       intensity: particles.cfg.intensity * (gainS >= 0 ? gainS : countGain(count)),
-      bead: count >= 262144 ? [0.2, 2.6] : [0.45, 1.85],   // the beads' range (RENDER_VS): skewed at 393k, milder on the 32-131k tiers (same mean 0.8)
+      bead: [beadLo, beadHi],   // the beads' range (RENDER_VS): skewed at 393k, milder on the 32-131k tiers (same mean 0.8)
       emberLevel: emberLevel(uniforms, time, verbWarm()), ...colors,
       verbs: verbs?.active() ? verbs.params(model.time) : null, rings: ringsU, tones: TONES,
     };
@@ -162,8 +171,8 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform1i(p.uPrev, bindTex(gl, 0, trail.read.texture));
     gl.uniform2f(p.uA, t.ax, t.ay); gl.uniform2f(p.uB, t.bx, t.by);
     gl.uniform1f(p.uRadius, t.pressDisc ? 0.06 : t.radius);
-    gl.uniform1f(p.uAspect, W / H); gl.uniform1f(p.uDecay, Math.pow(0.985, ratio)); gl.uniform1f(p.uTime, model.time % 1000);
-    gl.uniform1f(p.uGrow, 1 - Math.pow(0.65, ratio)); gl.uniform1f(p.uRatio, t.pressDisc ? 1 : ratio);   // rate-independent: 120 Hz no longer tears twice as heavy
+    gl.uniform1f(p.uAspect, W / H); gl.uniform1f(p.uDecay, Math.pow(LAG.trailDecay, ratio)); gl.uniform1f(p.uTime, model.time % 1000);
+    gl.uniform1f(p.uGrow, 1 - Math.pow(1 - LAG.trailGrow, ratio)); gl.uniform1f(p.uRatio, t.pressDisc ? 1 : ratio);   // rate-independent: 120 Hz no longer tears twice as heavy
     const cam = model.cam, s = model.state, sealing = s.resetT >= 0 && s.ampS > 1e-3 && cam.ready;   // a ring fading after an abort no longer seals
     gl.uniform3f(p.uSeal, cam.shellPx.x / Math.max(1, cam.width), cam.shellPx.y / Math.max(1, cam.height), s.front * cam.shellPx.r / Math.max(1, cam.height));
     gl.uniform1f(p.uSealK, sealing ? 1 - Math.pow(1 - RESET.seal * s.ampS, ratio) : 0);
@@ -176,19 +185,34 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  function drawEmber(prev, cam, u, time) {
+  function drawEmber(prev, cam, u, time, dt) {
     const p = emberP.uniforms, s = hdrScale;
     const ex = cam.emberPx[0] * s, ey = cam.emberPx[1] * s, er = Math.max(1, cam.emberR * s);
-    const x0 = Math.max(0, Math.floor(ex - 3 * er)), y0 = Math.max(0, Math.floor(ey - 3 * er));
-    const x1 = Math.min(W, Math.ceil(ex + 3 * er)), y1 = Math.min(H, Math.ceil(ey + 3 * er));
+    if (!hazeReady || dt <= 0 || EMBER.trailMs <= 0.1) {
+      hazeX = ex; hazeY = ey; hazeReady = true;
+    } else {
+      const k = 1 - Math.exp(-(dt * 1000) / EMBER.trailMs);   // dt in s, trailMs in ms
+      hazeX += (ex - hazeX) * k;
+      hazeY += (ey - hazeY) * k;
+    }
+    const offX = hazeX - ex, offY = hazeY - ey;
+    const pad = 3 * er + Math.hypot(offX, offY);
+    const x0 = Math.max(0, Math.floor(ex - pad)), y0 = Math.max(0, Math.floor(ey - pad));
+    const x1 = Math.min(W, Math.ceil(ex + pad)), y1 = Math.min(H, Math.ceil(ey + pad));
     if (x1 <= x0 || y1 <= y0) return;
+    const moving = u.u_motion.value > 0;
+    const lifeX = moving ? 1 + EMBER.life[0] * Math.sin((2 * Math.PI * time) / EMBER.lifeP[0]) : 1;
+    const lifeY = moving ? 1 + EMBER.life[1] * Math.sin((2 * Math.PI * time) / EMBER.lifeP[1] + 1.7) : 1;
     gl.useProgram(emberP.program);
     gl.uniform1i(p.uPrevHdr, bindTex(gl, 0, prev.texture)); gl.uniform1i(p.uTrail, bindTex(gl, 1, trail.read.texture));
     gl.uniform2f(p.uEmberPx, ex, ey); gl.uniform1f(p.uEmberR, er);
     gl.uniform3fv(p.uEmberCol, colors.ember); gl.uniform3fv(p.uEmberHot, colors.hot);
     gl.uniform1f(p.uLevel, emberLevel(u, time, verbWarm())); gl.uniform1f(p.uFlicker, 0.08 * (1 - u.u_build.value));
     gl.uniform1f(p.uWarmMix, Math.max(u.u_warm.value, verbWarm())); gl.uniform1f(p.uTime, time % 1000); gl.uniform2f(p.uInvRes, 1 / W, 1 / H);
-    gl.uniform2f(p.uOcc, EMBER_LIGHT.occCore, EMBER_LIGHT.occHalo);
+    { const L = EMBER_LIGHT; gl.uniform4f(p.uOcc, L.occCore, L.occBody, L.occHaze, L.keep); gl.uniform1f(p.uRedden, L.redden); }   // the amber eclipse
+    gl.uniform4f(p.uLayer, EMBER.coreK, EMBER.body, EMBER.bodyK, EMBER.bodyMix);
+    gl.uniform2f(p.uHazeOff, offX, offY);
+    gl.uniform2f(p.uLife, lifeX, lifeY);
     gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, x1 - x0, y1 - y0);
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -223,6 +247,13 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.uniform2f(p.uHazeLean, cam.hazePx[0], cam.hazePx[1]);
     gl.uniform1f(p.uGuardY, cam.guardY); gl.uniform1f(p.uGuardFeather, (tier.mobile ? 16 : 28) * (cam.scaleY || 1));
     gl.uniform1f(p.uDim, u.u_dim.value); gl.uniform1f(p.uCA, u.u_ca.value);
+    gl.uniform1f(p.uGlyphAmp, glyphAmp);
+    if (glyphAmp > 0) {
+      const [gx, gy, gw, gh, cols, rows, per, arows] = glyphs.grid();
+      gl.uniform1i(p.uGlyphCells, bindTex(gl, 3, glyphs.cells)); gl.uniform1i(p.uGlyphAtlas, bindTex(gl, 4, glyphs.atlas));
+      gl.uniform4f(p.uGlyphGrid, gx, gy, gw, gh); gl.uniform4i(p.uGlyphDims, cols, rows, per, arows);
+      gl.uniform3fv(p.uGlyphCol, glyphCol); gl.uniform3fv(p.uGlyphWarm, glyphWarm);
+    }
     blit(gl, null);
   }
 
@@ -247,11 +278,12 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
     gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo); gl.viewport(0, 0, W, H);
     gl.clearColor(inkLinear[0], inkLinear[1], inkLinear[2], 0); gl.clear(gl.COLOR_BUFFER_BIT);
     particles.draw(cam, rows * tier.side[0], u, drawOpts(time));
+    shield?.draw(cam, u, (cam.scaleY || 1) * hdrScale);
     if (u.u_classAmp.value > 0.001) classNodes.draw(cam, u, (cam.scaleY || 1) * hdrScale);
     if (model.linkAlpha > 0.001) plexus.draw(shape.nodes, cam.viewProj, [0.84, 0.91, 0.97], HAIRLINE_HDR * model.linkAlpha * Math.max(1, (cam.scaleY || 1) * hdrScale / 1.25));   // 1-device-px lines: keep v1's light per link at native DPI
     {   // the ember reads THIS frame's coverage (a texture cannot be sampled while it is drawn into): copy the ember's box of cur into
         // prev, which nothing else reads. The previous frame's coverage lagged moving particles by a frame (ghosts) and a still had none.
-      const sc = hdrScale, ex = cam.emberPx[0] * sc, ey = cam.emberPx[1] * sc, er = Math.max(1, cam.emberR * sc) * 3 + 2;
+      const sc = hdrScale, ex = cam.emberPx[0] * sc, ey = cam.emberPx[1] * sc, er = Math.max(1, cam.emberR * sc) * 3.5 + 8;
       const bx0 = Math.max(0, Math.floor(ex - er)), by0 = Math.max(0, Math.floor(ey - er)), bx1 = Math.min(W, Math.ceil(ex + er)), by1 = Math.min(H, Math.ceil(ey + er));
       if (bx1 > bx0 && by1 > by0) {
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, cur.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prev.fbo);
@@ -259,16 +291,21 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
         gl.bindFramebuffer(gl.FRAMEBUFFER, cur.fbo);
       }
     }
-    drawEmber(prev, cam, u, time);
-    if (view.readout && window.__hdrProbe) hdrProbe(cur, cam);
+    drawEmber(prev, cam, u, time, motion === 0 ? 0 : dt);
+    if (DBG && view.readout && window.__hdrProbe) hdrProbe(cur, cam);   // test builds: the bloom-block read-back
     const bloomTex = bloom.render(cur.texture, W, H) || cur.texture;
+    if (glyphs) {   // the glyph haze: its light and life for this frame (it breathes, flares and dims with the ember)
+      const P = model.state;
+      glyphAmp = glyphs.step(cam, view, motion === 0 ? 0 : dtMs, motion, emberLevel(u, time, verbWarm()), u.u_build.value, u.u_idle.value,
+        P.inScene ? { x: (P.raw[0] * 0.5 + 0.5) * cam.width, y: (P.raw[1] * 0.5 + 0.5) * cam.height, present: P.present } : null);
+    }
     composite(cur, bloomTex, cam, u);
     hdrIndex ^= 1;
     if (view.readout) { const t = performance.now(); if (t - lastErrorAt > 1000) { lastError = gl.getError(); lastErrorAt = t; } }   // debug only, ~1 Hz: getError waits on the GPU process
     return true;
   }
 
-  return {
+  const api = {
     type: 'webgl2', software: probe.software, gl, fluid,
     lost: () => gl.isContextLost(),
     ready: () => ok() && !!hdr[0],
@@ -281,12 +318,16 @@ export function createWebGLRenderer(canvas, uniforms, shape, model, { tier, prob
       if (hdr[0]) resize(lastW, lastH);
     },
     glError: () => lastError,
+    glyphs,
+    attachShield: DBG ? (m) => { if (!shield && model.shield) shield = m.createShieldRenderer(gl, caps, model.shield, colors); } : undefined,
     get rows() { return rows; },
     destroy() {
       if (gl.isContextLost()) return;
-      fluid.dispose(); particles.dispose(); classNodes.dispose();
+      fluid.dispose(); particles.dispose(); classNodes.dispose(); shield?.dispose(); glyphs?.dispose();
       hdr.forEach((t) => t?.dispose()); trail?.dispose();
       [trailP, emberP, compP, plexus.program].forEach((p) => gl.deleteProgram(p.program));
     },
   };
+  if (DBG) api.particles = particles;
+  return api;
 }

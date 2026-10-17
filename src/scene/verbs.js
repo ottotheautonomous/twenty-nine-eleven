@@ -94,10 +94,14 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
   }
 
   const slots = new Map();
+  let ver = 0, pver = -1;                           // params() is computed once per change (step/enter/exit/clear), however often it is read
+  const memo = new Map();                           // Compose's cell and Toolpath's path per word (the anchor depends only on theta)
+  const once = (key, fn) => { if (!memo.has(key)) memo.set(key, fn()); return memo.get(key); };
   const handoffWait = (s) => [...slots.values()].some((o) => o !== s && o.tau / o.T > 0.6);
   let clock = 0;                                    // ms of scene time (oscillations)
   function enter(name, { theta = 0, forward = [0, 0, -1], legs = 2 } = {}) {
     if (name === 'key' && spill) name = 'spill';
+    ver++;
     for (const o of slots.values()) if (o.name !== name) o.rate = -1.6;   // hand-off: the old one reverses at 0.625x
     const had = slots.get(name);
     if (had) { had.rate = 1; return had; }          // back on the same word mid-exit: it continues from where it is
@@ -105,9 +109,9 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
     const s = { name, theta, a, tau: 0, rate: 1, settle: 0, T: 600, wait: true, born: clock };
     if (name === 'resolve') s.T = 1560;            // the front at 2.4 rad/s reaches the antipode (pi + the 0.6 rad feather) at 1560 ms
     else if (name === 'aperture') s.T = 700;
-    else if (name === 'compose') { s.edges = cell(a).slice(0, 6); s.T = 110 * (s.edges.length - 1) + 200; }
+    else if (name === 'compose') { s.edges = once(`c${theta.toFixed(4)}`, () => cell(a).slice(0, 6)); s.T = 110 * (s.edges.length - 1) + 200; }
     else if (name === 'toolpath') {
-      const tp = toolpath(a, legs); s.legs = tp.legs; s.start = tp.start;
+      const tp = once(`t${theta.toFixed(4)}:${legs}`, () => toolpath(a, legs)); s.legs = tp.legs; s.start = tp.start;
       s.feed = 1.6 / 1000; s.plunge = 90; s.dwell = 60;
       s.T = s.plunge + s.legs.reduce((t, L) => t + L.len / s.feed, 0) + s.dwell * (s.legs.length - 1);
     } else if (name === 'key' || name === 'spill') s.T = 900;
@@ -121,13 +125,14 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
   }
   function exit(name, rate = 1) {
     if (name === 'key' && spill) name = 'spill';
+    ver++;
     const s = slots.get(name); if (!s) return;
     if (s.wait && s.tau === 0) { slots.delete(name); return; }
     s.rate = Math.min(s.rate, -rate);               // a snap already under way is never slowed
   }
-  function snapExiting() { for (const s of slots.values()) if (s.rate < 0) s.rate = Math.min(s.rate, -1.6); }
+  function snapExiting() { ver++; for (const s of slots.values()) if (s.rate < 0) s.rate = Math.min(s.rate, -1.6); }
   function step(dtMs) {
-    clock += dtMs;
+    clock += dtMs; ver++;
     for (const s of [...slots.values()]) {
       if (s.wait) { if (s.rate > 0 && handoffWait(s)) continue; s.wait = false; }
       s.tau = clamp(s.tau + dtMs * s.rate, 0, s.T);
@@ -136,7 +141,7 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
     }
   }
 
-  // Per-frame values for both renderers. t: scene seconds.
+  // Per-frame values for both renderers (memoised: the verbs' own clock drives them; the argument is ignored).
   const P = {
     resolve: { on: 0, front: 0, band: 0, crest: mobile ? 0.12 : 0, a: [0, 0, 1] },
     aperture: { on: 0, radius: 1.05, light: 0, att: 0 },
@@ -145,7 +150,9 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
     key: { yaw: 0, warm: 0 }, ember: { reach: 1, light: 1, warm: 0 },
     edit: { on: 0, light: new Float32Array(10), size: new Float32Array(10).fill(1) },
   };
-  function params(t) {
+  function params() {
+    if (pver === ver) return P;
+    pver = ver;
     const clockS = clock / 1000;
     P.resolve.on = 0; P.aperture.on = 0; P.compose.on = 0; P.toolpath.on = 0; P.edit.on = 0;
     P.key.yaw = 0; P.key.warm = 0; P.ember.reach = 1; P.ember.light = 1; P.ember.warm = 0;
@@ -197,12 +204,13 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
     cam.lightView = [lx / l, ly / l, lz / l];
   }
   // The Canvas2D twin of the RENDER_VS terms, per sprite (home h, random r, view-space offset from the ember dx, dy, the scalar
-  // flicker it would have). Returns [light multiplier, flicker, tone] with tone 0 = keep, 3 = the cool glint, 4 = warm (dawn).
+  // flicker it would have, its own ring index). Returns [light multiplier, flicker, tone] with tone 0 = keep, 3 = the cool glint, 4 = warm.
   const tw = [1, 1, 0];
-  function cpuLight(h, r, dx, dy, flick, time) {
+  function cpuLight(h, r, dx, dy, flick, time, ring = -1) {
     let add = 0, mul = 1, tone = 0, k = -1, th = 0;
     if (P.compose.on || P.toolpath.on || P.edit.on) {
-      let bd = 1e9; for (let q = 0; q < 10; q++) { const d = Math.abs(h[0] * ringN[q * 3] + h[1] * ringN[q * 3 + 1] + h[2] * ringN[q * 3 + 2]); if (d < bd) { bd = d; k = q; } }
+      k = ring;   // the grain's own ring (shape.ring, exact): a nearest-ring guess was wrong for 6.5 % and popped as the flow crossed rings
+      if (k < 0) { let bd = 1e9; for (let q = 0; q < 10; q++) { const d = Math.abs(h[0] * ringN[q * 3] + h[1] * ringN[q * 3 + 1] + h[2] * ringN[q * 3 + 2]); if (d < bd) { bd = d; k = q; } } }
       th = Math.atan2(h[0] * ringE2[k * 3] + h[1] * ringE2[k * 3 + 1] + h[2] * ringE2[k * 3 + 2], h[0] * ringE1[k * 3] + h[1] * ringE1[k * 3 + 1] + h[2] * ringE1[k * 3 + 2]);
     }
     if (P.resolve.on) {
@@ -249,7 +257,7 @@ export function createVerbs({ mobile = false, spill = false } = {}) {
     cpuLight,
     rings, ringN, ringE1, ringE2, crossings, cell, toolpath, onRing, angleOn,
     enter, exit, snapExiting, step, params, applyKey,
-    clear() { slots.clear(); params(0); },
+    clear() { slots.clear(); ver++; params(); },
     active: () => slots.size > 0,
     level: (name) => { const s = slots.get(name === 'key' && spill ? 'spill' : name); return s ? s.tau / s.T : 0; },
     entranceMs: (name) => slots.get(name === 'key' && spill ? 'spill' : name)?.T ?? 0,

@@ -1,5 +1,8 @@
 // The flow: each ring's dust slides along its own ring (DEPTH-SPEC §2). Each ring k turns its grains about its own axis at
 // omega0 * m_k * dir_k * (1 + vary * sin(2 pi t / P_k + ph_k)) * gain. Phases integrate the model's clock (pauses, clamped dt).
+// gain: the entrance ease (FLOW.easeIn after the simulation starts), times the resume ease: after a pause, a panel or a hidden tab
+// (sentinel.setActive(true) calls resume()) the dust re-eases from rest to its pace over FLOW.resume ms instead of restarting at full
+// pace in one frame.
 import { AX3, AX5, tiltMatrix } from './shape.js';
 import { FLOW as FLOW_CFG } from './constants.js';
 
@@ -11,11 +14,16 @@ const TABLES = {   // compose.mjs: stratified multipliers 0.62..1.38 shuffled + 
 const P = FLOW_CFG.period, PH = FLOW_CFG.phase;
 const debugHooks = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1';
 const Q = debugHooks ? new URLSearchParams(location.search) : new URLSearchParams();
+if (Q.has('lap') && Number.isFinite(+Q.get('lap')) && +Q.get('lap') > 0) FLOW_CFG.lap = +Q.get('lap');
+if (Q.has('depth') && Number.isFinite(+Q.get('depth'))) FLOW_CFG.depth = +Q.get('depth');
 export const FLOW = {
-  lap: +(Q.get('lap') || FLOW_CFG.lap),
-  vary: FLOW_CFG.vary,
-  easeIn: FLOW_CFG.easeIn / 1000,
-  depth: Q.has('depth') ? +Q.get('depth') : FLOW_CFG.depth,
+  get lap() { return FLOW_CFG.lap; },
+  set lap(v) { FLOW_CFG.lap = v; },
+  get vary() { return FLOW_CFG.vary; },
+  set vary(v) { FLOW_CFG.vary = v; },
+  get depth() { return FLOW_CFG.depth; },
+  set depth(v) { FLOW_CFG.depth = v; },
+  easeIn: FLOW_CFG.easeIn / 1000, resume: FLOW_CFG.resume / 1000,   // s (the constants are ms)
   off: Q.has('flowoff') || Q.get('flow') === '0',
 };
 export function createFlow(set = 1) {
@@ -24,18 +32,25 @@ export function createFlow(set = 1) {
   const axes = new Float32Array(30), rot = new Float32Array(30);
   normals.forEach((n, k) => axes.set(T.apply(n), k * 3));
   const phi = new Float64Array(N);
-  let t = 0, gain = 0, started = -1;
+  let t = 0, gain = 0, started = -1, resumeAt = -1, resumePending = false, last = 0;
+  const smooth = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
   for (let k = 0; k < N; k++) rot.set([1, 0, 0], k * 3);
   return {
     N, axes, rot, get gain() { return gain; },
+    // The next step starts the re-ease, live or not: a closing panel renders the dust before the scene is live again ('closed'), so
+    // waiting for live ran it at full pace through the close and then cut it to rest. None before the start or during the entrance ease.
+    resume() { resumePending = true; if (started >= 0 && last - started >= FLOW.easeIn) gain = 0; },   // at rest from here (the reading too)
     step(dt, sceneTime, live) {
       if (FLOW.off) return;
+      last = sceneTime;
       if (live && started < 0) started = sceneTime;
-      gain = started < 0 ? 0 : (() => { const x = Math.min(1, (sceneTime - started) / FLOW.easeIn); return x * x * (3 - 2 * x); })();
+      if (resumePending) { resumePending = false; if (started >= 0 && sceneTime - started >= FLOW.easeIn) resumeAt = sceneTime; }
+      gain = started < 0 ? 0 : smooth((sceneTime - started) / FLOW.easeIn);
+      if (resumeAt >= 0) { const x = (sceneTime - resumeAt) / FLOW.resume; if (x >= 1) resumeAt = -1; else gain *= smooth(x); }
       t += dt;
-      const w0 = 2 * Math.PI / FLOW.lap;
+      const w0 = 2 * Math.PI / Math.max(1, FLOW_CFG.lap);
       for (let k = 0; k < N; k++) {
-        const kk = k % 10, w = w0 * tab.m[kk] * tab.s[kk] * (1 + FLOW.vary * Math.sin(2 * Math.PI * t / P[kk] + PH[kk])) * gain;
+        const kk = k % 10, w = w0 * tab.m[kk] * tab.s[kk] * (1 + FLOW_CFG.vary * Math.sin(2 * Math.PI * t / P[kk] + PH[kk])) * gain;
         const d = w * dt; phi[k] = (phi[k] + d) % (2 * Math.PI);
         rot[k * 3] = Math.cos(phi[k]); rot[k * 3 + 1] = Math.sin(phi[k]); rot[k * 3 + 2] = d;
       }

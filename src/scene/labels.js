@@ -292,5 +292,19 @@ export function createLabels(root, instrument, shape) {
   function blinkIntegrity(from = 0.9, to = 0.998) {
     return animate(0, 5, { duration: 0.5, ease: 'linear', onUpdate: (v) => setIntegrity(from + (to - from) * Math.floor(v) / 5, true), onComplete: () => setIntegrity(to, true) });
   }
-  return { position, setIntegrity, rollIntegrity, cancelRoll, setState, setFindings, showTier0, hideAll, decodeInstrument, countIn, blinkIntegrity, stats };
+  // The readouts' boxes for the glyph haze's mask (CSS px [x0, y0, x1, y1]), from the positions written above and the monospace text
+  // (10.5 px IBM Plex Mono at .07em: 7.04 px per character, 4 px plate padding; 15.75 px per line): no layout read per frame.
+  const rectsOut = [];
+  function rects() {
+    rectsOut.length = 0;
+    for (const el of [...pool, tier0]) {
+      if (el.__state === 'idle' || !el.__text) continue;
+      const lines = String(el.__text).split('\n'), w = el.__w || Math.max(...lines.map((l) => l.length)) * 7.04 + 8, h = lines.length * 15.75;
+      const centred = el === tier0 || el.__side === 'C', x = el === tier0 ? g.ex : Math.round(el.__ax + el.__ox), y = el === tier0 ? (tier0.__above ? g.ey - 34 : g.ey + 28) : Math.round(el.__ay + el.__dy + (el.__side === 'C' ? 0 : -8));
+      const x0 = centred ? x - w / 2 : el.__flip ? x - w : x - 4;
+      rectsOut.push([x0, y, x0 + w, y + h]);
+    }
+    return rectsOut;
+  }
+  return { position, rects, setIntegrity, rollIntegrity, cancelRoll, setState, setFindings, showTier0, hideAll, decodeInstrument, countIn, blinkIntegrity, stats };
 }

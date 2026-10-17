@@ -3,8 +3,12 @@ import { createPlexusLogic } from './plexus.js';
 import { createCameraState, computeCamera, screenToWorldOnCentrePlane } from './camera.js';
 import { FINDING } from './shape.js';
 import { createFlow } from './flow.js';
-import { LAG, EXPOSURE, ORBIT, TIMING, INTEGRITY, RESET, TEAR, NODES } from './constants.js';
+import { LAG, HAND, EXPOSURE, ORBIT, TIMING, INTEGRITY, RESET, TEAR, NODES, DBG } from './constants.js';
 const inOut3 = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+// The camera's yaw toward the pointer: ORBIT.yaw, or ORBIT.yawCoarse on touch screens when set (test builds: ?yawc=<rad>).
+const coarsePointer = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)') : { matches: false };
+const yawQuery = DBG && typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('yawc')) : NaN;
+export const orbitYaw = () => (coarsePointer.matches ? (yawQuery > 0 ? yawQuery : ORBIT.yawCoarse ?? ORBIT.yaw) : ORBIT.yaw);
 const ZERO2 = [0, 0];
 
 // The interaction model: GL-free and authoritative for everything the DOM shows. Both renderers read it.
@@ -14,7 +18,7 @@ const ZERO2 = [0, 0];
 // CPU twin of trail.glsl on a coarse grid over the viewport (uv, y up). Integrity and the Canvas2D tier read it.
 // Its cells are ~6.5x larger than the GPU trail's texels, so the per-frame dilation is scaled down to match the
 // GPU trail's spread in screen space (0.35 per 1/5-res texel ≈ 0.055 per grid cell).
-const GRID_GROW = LAG.trailGrow * 0.16;
+const GRID_GROW = LAG.trailGrow * 0.16;   // production: fixed at load; the lab (DBG) reads LAG.trailGrow live
 export function createTrailGrid(w = 48, h = 27) {
   let v = new Float32Array(w * h), tmp = new Float32Array(w * h);
   const rim = new Float32Array(w * h), head = new Float32Array(w * h);   // leading edge this tick; its x0.9-per-tick smoothed head (as trail.glsl G/B)
@@ -42,7 +46,7 @@ export function createTrailGrid(w = 48, h = 27) {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const i = y * w + x, c = v[i];
         const n = Math.max(x > 0 ? v[i - 1] : 0, x < w - 1 ? v[i + 1] : 0, y > 0 ? v[i - w] : 0, y < h - 1 ? v[i + w] : 0);
-        tmp[i] = c + (Math.max(c, n) - c) * GRID_GROW;
+        tmp[i] = c + (Math.max(c, n) - c) * (DBG ? LAG.trailGrow * 0.16 : GRID_GROW);
       }
       // The grid is coarser than the GPU trail: thin sweeps are drawn one cell wide but amplitude-gated, so a
       // sweep the GPU trail barely paints barely counts toward integrity.
@@ -104,7 +108,7 @@ export function createModel(shape, uniforms) {
   const flow = createFlow(shape.set);
   const s = {
     time: 0, simulate: false, inScene: false, returning: false, still: false, modal: false, keyboard: false,
-    raw: [0, 0], lastRaw: [0, 0], lastPointerAt: -1e9, pointerDirty: false,
+    raw: [0, 0], lastRaw: [0, 0], lastPointerAt: -1e9, pointerDirty: false, rawSpeed: 0,
     probeS: [0, 0, 0], probeRaw: [0, 0, 0], vel: 0, yaw: 0, pitch: 0, orbitNorm: [0, 0],
     tear: 0, integrity: INTEGRITY.rest, tears: 0, armed: true, finding: -1, findingDone: false,
     state: 'STANDBY', loseAt: 0,
@@ -115,6 +119,7 @@ export function createModel(shape, uniforms) {
     probeVel: [0, 0, 0], lastProbeRaw: [0, 0, 0], poke: 0, wake: 0, probeJump: false, handDir: [0, 0, -1],
     // the integrity ledger and the reset (see INTEGRITY / RESET)
     quietSince: -1e9, damage: 0, deficit: 0, pressOnly: false, resetting: false, released: false, rollUntil: 0, resetT: -1, front: -10, resetAmp: 0, ampS: 0,
+    shield: null,   // test builds only: Argon's elastic shield (?shield=1), attached lazily by sentinel.attachShield
   };
   s.tilt = null;   // main.js: the device-tilt input (src/tilt.js). It feeds the lean in step 3 and nothing else.
   const eyeDir = [0, 0, -1], tmp3 = [0, 0, 0];
@@ -149,6 +154,7 @@ export function createModel(shape, uniforms) {
       }
       s.lastRaw[0] = s.raw[0]; s.lastRaw[1] = s.raw[1]; s.pointerDirty = false;
     }
+    s.rawSpeed = rawSpeed;
     if (motion) pf.step(ratio);
     s.vel = pf.state.vel;
     // 2. world probes on the centre plane (last frame's camera is fine)
@@ -165,11 +171,12 @@ export function createModel(shape, uniforms) {
     for (let i = 0; i < 3; i++) s.lastProbeRaw[i] = s.probeRaw[i];
     const pvl = Math.hypot(s.probeVel[0], s.probeVel[1], s.probeVel[2]);
     if (pvl > 4) for (let i = 0; i < 3; i++) s.probeVel[i] *= 4 / pvl;
-    s.poke = Math.max(s.poke * friction(LAG.poke, ratio), Math.min(1, rawSpeed / 2.0)) * motion * (s.simulate ? 1 : 0);   // no shove while the cage builds
+    s.poke = Math.max(s.poke * friction(LAG.poke, ratio), Math.min(1, rawSpeed / HAND.sat)) * motion * (s.simulate ? 1 : 0);   // no shove while the cage builds
     s.wake = Math.max(s.wake * friction(LAG.wake, ratio), s.poke) * motion;   // the light's slower tail: lit particles stay lit on their way home
     // 3. orbit through two cascaded lerps; half speed while losing the visitor
     const aimed = (s.inScene || s.keyboard) && motion;
-    const aim = aimed ? [pf.state.sx * ORBIT.yaw, -pf.state.sy * ORBIT.pitch] : [0, 0];
+    const yawK = orbitYaw();
+    const aim = aimed ? [pf.state.sx * yawK, -pf.state.sy * ORBIT.pitch] : [0, 0];
     const k = s.returning ? LAG.orbit * 0.5 : LAG.orbit;
     const oy = orbit[0].step(aim[0], ratio, k), op = orbit[1].step(aim[1], ratio, k);
     if (s.returning && Math.hypot(oy, op) < 0.002) s.returning = false;
@@ -181,7 +188,13 @@ export function createModel(shape, uniforms) {
     lean[0].step(clamp(leanAim[0], -1.5, 1.5), ratio); lean[1].step(clamp(leanAim[1], -1.5, 1.5), ratio);
     // 4. camera for this frame
     computeCamera(cam, u, view, { yaw: s.yaw, pitch: s.pitch }, [lean[0].value, lean[1].value]);
-    if (api.verbs && motion && s.simulate) api.verbs.step(dtMs);   // PROTOTYPE living verbs: stepped on the frame clock
+    if (api.verbs && motion && s.simulate) api.verbs.step(Math.min(Math.max(dtMs, 0), 100));   // living verbs: stepped on the frame clock (clamped as the model)
+    if (api.verbs?.active()) { api.verbs.params(); api.verbs.applyKey(cam); }   // Creative production's key light swings on the verb's entrance clock (and back on its exit)
+    // 4b. Argon's elastic grid shield (test builds, ?shield=1; null otherwise)
+    if (s.shield?.on) {
+      if (motion > 0 && !s.still && !s.modal) s.shield.step(dt * motion, api, cam, view, u);
+      else s.shield.reset();
+    }
     // 5. CPU trail twin and integrity. The grid gets the real previous -> current segment (b advances here) and
     //    paints only while the hand moves: lag velocity lingers after a stop and must never paint at the rest point.
     //    Sub-stepped at 30 Hz so the dip matches 60 Hz.
@@ -285,7 +298,7 @@ export function createModel(shape, uniforms) {
     // 10. presence (the lattice only notices a visitor who is there) and publish
     const want = (s.inScene || s.keyboard) && !s.modal ? 1 : 0;
     s.present = approach(s.present, want, dt * motion, want ? 0.6 : 1.5);
-    s.orbitNorm[0] = orbit[0].value / ORBIT.yaw; s.orbitNorm[1] = orbit[1].value / ORBIT.pitch;
+    s.orbitNorm[0] = orbit[0].value / yawK; s.orbitNorm[1] = orbit[1].value / ORBIT.pitch;   // the wordmark's parallax: normalised, so it never grows with the yaw
     publish();
     s.onFrame?.();
   }
@@ -300,6 +313,7 @@ export function createModel(shape, uniforms) {
     s.trail.radius = 0; s.trail.pressDisc = false; s.present = 0;
     s.poke = 0; s.wake = 0; s.probeJump = true; for (const a of [s.probeVel, s.probeRaw, s.lastProbeRaw]) a[0] = a[1] = a[2] = 0;
     s.handDir[0] = 0; s.handDir[1] = 0; s.handDir[2] = -1;
+    s.shield?.reset();
     s.tier0.on = false; s.tier0.since = -1;
     api.verbs?.clear();
     trailGrid.clear();
@@ -356,8 +370,9 @@ export function createModel(shape, uniforms) {
 
   const api = {
     state: s, cam, plexus, trailGrid, shape, flow, verbs: null, step, drawStill, pointer, press, tap, enter, leave, rowHover,
+    get pointerRaw() { return [pf.state.x, pf.state.y]; },
     get labels() { return s.labels; }, get linkAlpha() { return s.linkAlpha; }, get simulate() { return s.simulate; },
-    get time() { return s.time; }, get trail() { return s.trail; }, get orbitNorm() { return s.orbitNorm; },
+    get shield() { return s.shield; }, get time() { return s.time; }, get trail() { return s.trail; }, get orbitNorm() { return s.orbitNorm; },
   };
   return api;
 }

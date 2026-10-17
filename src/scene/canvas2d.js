@@ -1,6 +1,6 @@
 import { frameRatio, damp, friction, smoothstep, clamp } from './damp.js';
 import { projectPx } from './camera.js';
-import { hexRGB, COLORS, NODES, LAG, HAND, RESET, EMBER, EMBER_LIGHT } from './constants.js';
+import { hexRGB, COLORS, NODES, LAG, HAND, RESET, EMBER, EMBER_LIGHT, FLOW, FORM, DBG } from './constants.js';
 
 // The Canvas2D tier: the same design drawn with sprites. Same homes (R2 order), same camera, same model,
 // same lag chain; a JS velocity grid stands in for the fluid and the model's CPU trail grid for the GPU trail.
@@ -9,6 +9,13 @@ TONES.push(TONES[2].map((c, i) => c + (hexRGB(COLORS.ember)[i] - c) * 0.45));   
 const RADII = [2.1, 3.4, 4.75];                      // CSS px (v1's 2/3/4, the large two grown: they carry the wider tube's width; the small one carries the beads); x the backing scale
 const BEAD = [0.62, 2.2];                            // per-sprite gain, skewed g^3 (mean 1.0; as RENDER_VS's beads): a few bright, crisp sprites in a dimmer body
 const BUCKETS = [0.05, 0.1, 0.18, 0.28, 0.38];         // globalAlpha per intensity bucket
+const BEAD_MEAN = 0.75 * BEAD[0] + 0.25 * BEAD[1];   // g^3 averages 1/4: the bead gain's mean (the eclipse's bead weight is gain / mean)
+// Pop guards (DEPTH-SPEC §2.10): since the flow every sprite slides, so every hard threshold it crosses would flip in one frame.
+// Each discrete choice keeps its last value inside a dead band: lit tone ±0.025, size index ±0.02, intensity bucket ±8 %; the back
+// hemisphere's dimming is a smooth ramp across the limb and the eclipse veil a smooth weight.
+const TONE_H = 0.025, SIZE_H = 0.02, BUCKET_H = 0.08;
+const BUCKET_LO = BUCKETS.map((b, k) => (k === 0 ? 0.02 : (BUCKETS[k - 1] + b) / 2)), BUCKET_HI = BUCKETS.map((b, k) => (k === BUCKETS.length - 1 ? Infinity : (b + BUCKETS[k + 1]) / 2));
+const bandOf = (v, prev, cuts, h) => { let k = 0; while (k < cuts.length && v >= cuts[k] + (prev > k ? -h : h)) k++; return k; };   // prev's own edges move outward by h
 
 function makeSprite(r, rgb) {
   const size = Math.ceil(r * 2 + 2), c = document.createElement('canvas');
@@ -21,23 +28,23 @@ function makeSprite(r, rgb) {
   return c;
 }
 
-export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
+export function createCanvasRenderer(canvas, uniforms, shape, model, { tier } = {}) {
   let ctx;
   try { ctx = canvas.getContext('2d', { alpha: false }); } catch { return null; }
   if (!ctx) return null;
   const maxN = Math.min(tier.sprites || 2000, shape.count);
   let N = maxN;
-  let ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten, tone, sizeIdx, veil;
+  let ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten, veil, tone, baseTone, sizeIdx, bucket;
   function alloc() {
-    [ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten] = Array.from({ length: 12 }, () => new Float32Array(N));
-    tone = new Uint8Array(N); sizeIdx = new Uint8Array(N); veil = new Uint8Array(N);
+    [ox, oy, oz, vx, vy, vz, d1, d2, sx, sy, sz, inten, veil] = Array.from({ length: 13 }, () => new Float32Array(N));
+    tone = new Uint8Array(N); baseTone = new Uint8Array(N); sizeIdx = new Uint8Array(N); bucket = new Uint8Array(N).fill(255);   // 255: not drawn
   }
   alloc();
   const G = { w: 32, h: 18, vx: new Float32Array(32 * 18), vy: new Float32Array(32 * 18), tx: new Float32Array(32 * 18), ty: new Float32Array(32 * 18) };
-  let sprites = [], spriteScale = 0, hazeImg = null, hazeR = 0;
+  let sprites = [], spriteScale = 0, hazeImg = null, hazeR = 0, shield2D = null;
   const small = document.createElement('canvas'), sctx = small.getContext('2d');
   const layer = document.createElement('canvas'), lctx = layer.getContext('2d');      // emissive layer on black: bloom adds only light
-  const vmask = document.createElement('canvas'), vctx = vmask.getContext('2d');     // the ember's veil: front sprites union, erased once (a floor, like GL)
+  const vmask = document.createElement('canvas'), vctx = vmask.getContext('2d');     // the ember's veil: the weighted union of the front sprites, erased once
   const linkBuf = new Float32Array(model.plexus.maxVertices * 4);
   const tmp = [0, 0, 0], hFlow = [0, 0, 0];
 
@@ -112,12 +119,17 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     const tapT = u.u_tapT.value, tapX = u.u_tapX.value, tapY = u.u_tapY.value, tapZ = u.u_tapZ.value, sentry = u.u_sentry.value;
     const KEY = cam.lightDir;
     const dens = 2000 / N;                              // luminance stays put as the sprite count changes
+    if (DBG) pops.frames++;
     const verbs = model.verbs?.active() ? model.verbs : null, VB = verbs ? verbs.params(time) : null;   // living verbs: the CPU twin
     const lvl = emberLevel(u, time, VB ? VB.ember.warm : 0) * (0.55 + 0.45 * model.trailGrid.maxAround(cam.emberPx[0], cam.emberPx[1], W, H));   // the ember's level (a tear lets the warmth out)
     const reachK = VB ? VB.ember.reach : 1, lightK = VB ? VB.ember.light : 1, hv = [0, 0, 0];
     const EV = cam.emberView, eReach2 = (EMBER_LIGHT.reach * reachK) ** 2, eFall2 = EMBER_LIGHT.falloff * EMBER_LIGHT.falloff, eGain = EMBER_LIGHT.light * lightK * Math.min(lvl, 1.2);
     const flow = model.flow;
+    const backDim = Math.max(0.1, 1 - FLOW.depth * 3.05), keyWarm = VB ? VB.key.warm : 0;
+    const t4 = 0.10 * Math.max(1, EMBER_LIGHT.light / 0.9);   // the ember-lit tone's threshold, scaled with the cast (light 2.5: back strands amber, front silver)
+    let p0 = 0, p1 = 0, p2 = 0, p3 = 0;   // test builds: the sprite's discrete state before this frame (pop counters)
     for (let i = 0; i < N; i++) {
+      if (DBG) { p0 = tone[i]; p1 = sizeIdx[i]; p2 = bucket[i]; p3 = veil[i]; }
       let hx = shape.homes[i * 4], hy = shape.homes[i * 4 + 1], hz = shape.homes[i * 4 + 2]; const r = shape.homes[i * 4 + 3];
       if (flow) { flow.apply(shape.ring[i], hx, hy, hz, hFlow); hx = hFlow[0]; hy = hFlow[1]; hz = hFlow[2]; }
       // build-inward front in view space
@@ -184,12 +196,14 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const tap = tapT > 0 && tapT < 1 ? Math.exp(-(((Math.hypot(hx - tapX, hy - tapY, hz - tapZ) - 2.4 * tapT) / 0.14) ** 2)) * (1 - tapT) : 0;
       const sen = sentry > 0 ? 0.15 * Math.exp(-(((0.5 + 0.5 * (hx * KEY[0] + hy * KEY[1] + hz * KEY[2]) / nl - (1 - sentry)) / 0.08) ** 2)) : 0;
       let flick = r < 0.08 ? 0.6 + 0.4 * Math.sin(0.8 * time + 97 * r) * Math.sin(1.73 * time + 31 * r) : 1, vMul = 1, vTone = 0;
-      if (verbs) { hv[0] = hx; hv[1] = hy; hv[2] = hz; const o = verbs.cpuLight(hv, r, vxh - EV[0], vyh - EV[1], flick, time); vMul = o[0]; flick = o[1]; vTone = o[2]; }
+      if (verbs) { hv[0] = hx; hv[1] = hy; hv[2] = hz; const o = verbs.cpuLight(hv, r, vxh - EV[0], vyh - EV[1], flick, time, shape.ring[i]); vMul = o[0]; flick = o[1]; vTone = o[2]; }
       const dfr = Math.hypot(vxh, vyh) - RF, wave = RA > 1e-3 ? RA * Math.exp(-dfr * dfr / (RB * RB)) : 0;   // the resync ring's light (the tap's vocabulary)
+      const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
       const grow = 1 + 0.3 * (ring + tap + wave) + 0.12 * d2[i];
       const boost = 1 + 1.5 * (ring + tap + wave) + sen;
       const lit = 0.25 + 0.75 * diff;
-      let tn = lit < 0.35 ? 0 : lit < 0.62 ? 1 : 2;
+      let tn = bandOf(lit, baseTone[i], [0.35, 0.62], TONE_H); baseTone[i] = tn;
+      if (tn === 2 && keyWarm > 0 && (r * 29.3) % 1 < Math.min(1, 2.5 * keyWarm * diff)) tn = 4;   // Creative production's key light: a share of the lit side takes the warm tone (GL: x warm x diff)
       let touch = 0;
       if (s.wake > 1e-3) {
         const dx_ = px - PR[0], dy_ = py - PR[1], dz_ = pz - PR[2], al = dx_ * HD[0] + dy_ * HD[1] + dz_ * HD[2];
@@ -199,10 +213,19 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       const depth = w > 0 ? cam.dist / w : 1;
       const grain = (r * 13.7) % 1;                    // per-particle grain, fixed for life
       const sizeF = depth * grow * (0.75 + 0.55 * grain);
-      sizeIdx[i] = sizeF < 0.97 ? 0 : sizeF < 1.08 ? 1 : 2;
+      sizeIdx[i] = bandOf(sizeF, sizeIdx[i], [0.97, 1.08], SIZE_H);
       const energy = Math.max(0.03, Math.pow(1 / grow, 1.5));
-      const fwd = cam.forward, back = (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) > 0 ? 0.45 : 1;   // far hemisphere dimmer: the cage has a back
-      const dz = (view4[2] * hx + view4[6] * hy + view4[10] * hz) / nl;                           // limb factor: edge-on struts stop stacking to white
+      const fwd = cam.forward, back = 1 - (1 - backDim) * smoothstep(-0.12, 0.12, (hx * fwd[0] + hy * fwd[1] + hz * fwd[2]) / nl);   // far hemisphere dimmer: the cage has a back (a ramp across the limb)
+      // FORM (FORM-SPEC 3), RENDER_VS's scalar twin by the sprite's real position: the far fade by its view depth zF (R, +1 front pole),
+      // the smoked glass over the view ray's path inside the sphere in front of it (eye at the view origin, centre at view4[12..14]),
+      // x FORM.c2d (the sparse sprites and the saturating cast need about twice the smoke). The lab's rim is GL-only here.
+      const zF = view4[2] * px + view4[6] * py + view4[10] * pz, dF = clamp(0.5 - 0.5 * zF, 0, 1); let formK = 1;
+      if (FORM.far > 0 || FORM.smoke > 0) {
+        const cx_ = view4[12], cy_ = view4[13], cz_ = view4[14], gx = view4[0] * px + view4[4] * py + view4[8] * pz + cx_, gy = view4[1] * px + view4[5] * py + view4[9] * pz + cy_, gz = zF + cz_;
+        const tg = Math.hypot(gx, gy, gz) || 1e-4, b = (gx * cx_ + gy * cy_ + gz * cz_) / tg, disc = b * b - (cx_ * cx_ + cy_ * cy_ + cz_ * cz_) + 1;
+        const Lg = disc > 0 ? clamp(tg - (b - Math.sqrt(disc)), 0, 2 * Math.sqrt(disc)) : 0;
+        formK = (1 - FORM.far * Math.pow(dF, FORM.curve)) * Math.exp(-FORM.c2d * FORM.smoke * Lg);
+      }
       const limb = 0.25 + 0.75 * smoothstep(0.1, 0.6, Math.abs(dz));                              // 1 face-on .. 0.25 edge-on (matches GL's vLimb on the lingering trail)
       if (speed > 0.004 || tr2 * limb > 0.25 || d2[i] > 0.45 || touch > 0.3 || wave > 0.3) tn = 3;
       const bead = BEAD[0] + (BEAD[1] - BEAD[0]) * ((r * 61.7) % 1) ** 3;   // fixed for life (the same second random as GL's beads)
@@ -211,13 +234,23 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       // quarter (its rim) and veils the source
       const vxp = view4[0] * px + view4[4] * py + view4[8] * pz + view4[12] - EV[0], vyp = view4[1] * px + view4[5] * py + view4[9] * pz + view4[13] - EV[1];
       const vzp = view4[2] * px + view4[6] * py + view4[10] * pz + view4[14] - EV[2], rho2 = vxp * vxp + vyp * vyp, nearer = vzp > 0;
-      const eL = eGain * Math.exp(-rho2 / eReach2) / (1 + (rho2 + vzp * vzp) / eFall2) * (nearer ? 0.25 : 1);
-      if (tn < 3 && (eL > 0.10 || (tone[i] === 4 && eL > 0.08))) tn = 4;   // hysteresis: the idle breath and drift never flicker the tone
+      // in front, only the rim that points inward catches it (as RENDER_FS): a quarter of the light times sin^2 of the angle off the
+      // ember's axis, so the body right over the core stays cold and the front strands stay silver while the back glows amber
+      const eL = eGain * Math.exp(-rho2 / eReach2) / (1 + (rho2 + vzp * vzp) / eFall2) * (nearer ? 0.25 * rho2 / Math.max(rho2 + vzp * vzp, 1e-6) : 1);
+      const t4f = FORM.tint > 0 ? t4 * (1 - 0.8 * FORM.tint * smoothstep(0.35, 1, dF)) : t4;   // FORM's warm far tint: far sprites take the ember-lit tone a little sooner
+      if (tn < 3 && (eL > t4f || (tone[i] === 4 && eL > 0.8 * t4f))) tn = 4;   // hysteresis: the idle breath and drift never flicker the tone
       if (vTone) tn = vTone;                                                     // living verbs: the glint (rim) or the dawn (ember-lit silver)
       const rhoH = Math.sqrt(rho2) / EMBER.haloR;
       inten[i] *= 1 + 1.2 * eL;
-      veil[i] = nearer && rho2 < 0.25 && rhoH > 0.09 ? 1 : 0;   // in front and within 0.5 R of the ember in the view plane; never a speck inside the core itself
+      if (formK < 1) inten[i] = Math.min(inten[i], BUCKETS[BUCKETS.length - 1]) * formK;   // FORM: clamp to the top bucket first (a back sprite 3x over it would stay top), then dim
+      if (DBG && FORM.mode && ((FORM.mode === 1 && zF < 0) || (FORM.mode === 2 && zF >= 0))) inten[i] = 0;   // test builds: one layer alone (split captures)
+      // the eclipse's veil weight: in front and within 0.5 R of the ember in the view plane, smooth at both edges (no pops), lighter in the
+      // core's own centre (never a speck), and weighted by the sprite's bead (the beads veil, the faint body barely does)
+      veil[i] = smoothstep(-EMBER_LIGHT.split, EMBER_LIGHT.split, vzp) * (1 - smoothstep(0.20, 0.25, rho2)) * (0.6 + 0.4 * smoothstep(0.03, 0.09, rhoH)) * Math.min(1, 1 + EMBER_LIGHT.occBead * (bead / BEAD_MEAN - 1));   // soft across the ember's depth, as GL's vOcc
       tone[i] = tn;
+      { const I = inten[i], b = bucket[i];   // the intensity bucket, kept while I stays within 8 % of its edges
+        bucket[i] = I < BUCKET_LO[0] * (b === 0 ? 1 - BUCKET_H : 1) ? 255 : b !== 255 && I >= BUCKET_LO[b] * (1 - BUCKET_H) && I < BUCKET_HI[b] * (1 + BUCKET_H) ? b : bandOf(I, -1, BUCKET_LO.slice(1), 0); }
+      if (DBG) { pops.tone += tone[i] !== p0; pops.size += sizeIdx[i] !== p1; pops.bucket += bucket[i] !== p2; pops.veil += Math.abs(veil[i] - p3) > 0.1; pops.tone4 += (tone[i] === 4) !== (p0 === 4); }
     }
     // ---- paint: emissive layer first (on black), then background + layer + bloom of the layer ----
     if (layer.width !== W || layer.height !== H) { layer.width = W; layer.height = H; }
@@ -237,13 +270,30 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
       g.addColorStop(0.3, `rgba(240,166,94,${0.08 * a * (1 - air)})`);
       g.addColorStop(1, 'rgba(240,166,94,0)');
       ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(ex - er * 1.6, ey - er * 1.6, er * 3.2, er * 3.2);
-      // the veil: the union of the front sprites (source-over into a mask the size of the ember box), erased once at EMBER_LIGHT.veil,
-      // so overlapping sprites can never cut deeper than one (GL's floor), never a black hole
-      const bx = Math.floor(ex - er * 1.6), by = Math.floor(ey - er * 1.6), bs = Math.ceil(er * 3.2) + 2;
+      // the amber eclipse's twin: the weighted union of the front sprites (each at its smooth veil weight, source-over into a mask
+      // over the veil's reach, 0.5 R about the ember), erased once at EMBER_LIGHT.veil so overlaps never cut deeper than one; keep caps
+      // what the core as a whole can lose; then the erased light comes back partly as amber (redden): never a dark speck
+      const vr = Math.ceil(0.5 * cam.shellPx.r + 8 * scale), bx = Math.floor(ex - vr), by = Math.floor(ey - vr), bs = 2 * vr + 2;
       if (vmask.width !== bs || vmask.height !== bs) { vmask.width = bs; vmask.height = bs; } else vctx.clearRect(0, 0, bs, bs);
       vctx.globalCompositeOperation = 'source-over';
-      for (let i = 0; i < N; i++) { if (!veil[i] || sz[i] <= 0 || inten[i] < 0.02) continue; const sp = sprites[sizeIdx[i]][0], half = sp.width / 2; vctx.drawImage(sp, sx[i] - half - bx, sy[i] - half - by); }
-      ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = EMBER_LIGHT.veil; ctx.drawImage(vmask, bx, by); ctx.globalAlpha = 1;
+      const kr = 0.12 * er, kr2 = kr * kr; let cw = 0, any = false;
+      for (let i = 0; i < N; i++) {
+        const w = veil[i]; if (w < 0.02 || sz[i] <= 0 || inten[i] < 0.02) continue;
+        const sp = sprites[sizeIdx[i]][0], half = sp.width / 2; vctx.globalAlpha = w; vctx.drawImage(sp, sx[i] - half - bx, sy[i] - half - by); any = true;
+        const dx = sx[i] - ex, dy = sy[i] - ey; if (dx * dx + dy * dy < kr2) cw += w * (half * half) / kr2;   // sprite area / core area (pi cancels)
+      }
+      vctx.globalAlpha = 1;
+      if (any && EMBER_LIGHT.veil > 0) {
+        const V = EMBER_LIGHT.veil, keep = EMBER_LIGHT.keep, s = keep > 0 ? (1 - keep) / Math.max(V * Math.min(1, cw), 1 - keep) : 1;
+        ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = V * s; ctx.drawImage(vmask, bx, by); ctx.globalAlpha = 1;
+        if (EMBER_LIGHT.redden > 0) {   // the mask, recoloured with the source's own falloff in the ember tone, added back
+          const ag = vctx.createRadialGradient(ex - bx, ey - by, 0, ex - bx, ey - by, er * 1.6);
+          ag.addColorStop(0, 'rgba(240,166,94,1)'); ag.addColorStop(0.04, 'rgba(240,166,94,0.9)');
+          ag.addColorStop(0.12, `rgba(240,166,94,${0.35 * (1 - air)})`); ag.addColorStop(0.3, `rgba(240,166,94,${0.08 * (1 - air)})`); ag.addColorStop(1, 'rgba(240,166,94,0)');
+          vctx.globalCompositeOperation = 'source-in'; vctx.fillStyle = ag; vctx.fillRect(0, 0, bs, bs); vctx.globalCompositeOperation = 'source-over';
+          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(1, EMBER_LIGHT.redden * V * s * a); ctx.drawImage(vmask, bx, by); ctx.globalAlpha = 1;
+        }
+      }
       g = ctx.createRadialGradient(ex, ey, 0, ex, ey, er * 1.6);
       g.addColorStop(0, 'rgba(240,166,94,0)');
       g.addColorStop(0.04, 'rgba(240,166,94,0)');
@@ -255,15 +305,14 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
     ctx.globalCompositeOperation = 'lighter';
     for (let b = 0; b < BUCKETS.length; b++) {
       ctx.globalAlpha = BUCKETS[b];
-      const lo = b === 0 ? 0.02 : (BUCKETS[b - 1] + BUCKETS[b]) / 2, hi = b === BUCKETS.length - 1 ? Infinity : (BUCKETS[b] + BUCKETS[b + 1]) / 2;
       for (let i = 0; i < N; i++) {
-        const I = inten[i];
-        if (I < lo || I >= hi || sz[i] <= 0) continue;
+        if (bucket[i] !== b || sz[i] <= 0) continue;
         const sp = sprites[sizeIdx[i]][tone[i]], half = sp.width / 2;
         ctx.drawImage(sp, sx[i] - half, sy[i] - half);
       }
     }
     ctx.globalAlpha = 1;
+    if (shield2D && model.shield) shield2D(ctx, model.shield, cam, u, W, H);   // test builds only (?shield=1): Argon's shield
     // class nodes while a row-1 word is hovered
     const classAmp = u.u_classAmp.value;
     if (classAmp > 0.001) {
@@ -309,10 +358,13 @@ export function createCanvasRenderer(canvas, uniforms, shape, model, { tier }) {
   }
 
   // The governor lowers the active sprite count without reallocating, so particles keep their state.
-  return { type: 'canvas2d', software: false, lost: () => false, ready: () => true, resize() {}, draw, destroy() {}, setSprites(n) {
+  const pops = { frames: 0, tone: 0, tone4: 0, size: 0, bucket: 0, veil: 0 };   // test builds: discrete state changes summed over sprites (pop guards)
+  const api = { type: 'canvas2d', software: false, lost: () => false, ready: () => true, resize() {}, draw, destroy() {}, attachShield: DBG ? (m) => { shield2D = m.drawShield2D; } : undefined, setSprites(n) {
     const next = Math.max(250, Math.min(maxN, Math.round(n)));
     // Sprites coming back start at rest on the lattice; their stored state is stale from when they were last drawn.
     for (const a of [ox, oy, oz, vx, vy, vz, d1, d2]) a.fill(0, N, Math.max(N, next));
     N = next;
   }, get sprites() { return N; } };
+  if (DBG) api.pops = pops;
+  return api;
 }

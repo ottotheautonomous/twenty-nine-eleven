@@ -1,4 +1,4 @@
-// Composite: HDR scene + bloom -> ACES -> sRGB -> haze, slate lift, highlight tint toward the ember, vignette,
+// Composite: HDR scene + bloom -> ACES -> sRGB -> haze, slate lift, highlight tint toward the ember, the glyph haze, vignette,
 // dim, chromatic aberration (entrance/modal only, masked to the disc), blue-noise dither. Extends the kit's grade.glsl.
 in vec2 vUv;
 uniform sampler2D uScene, uBloom, uBlue;
@@ -10,6 +10,13 @@ uniform vec3 uShell;                         // shell centre (px, y up) and radi
 uniform vec2 uHazeLean;                      // the haze leans with the probe (px)
 uniform float uGuardY, uGuardFeather;        // lower limb (px, y up); bloom fades to 0 within the feather below it
 uniform float uDim, uCA;
+// The glyph haze (glyphs.js): a grid of cells, each (glyph, light) in uGlyphCells, the glyphs' coverage in uGlyphAtlas (white on black,
+// one output-px-exact cell each). uGlyphAmp 0 = no field, no fetches.
+uniform sampler2D uGlyphCells, uGlyphAtlas;
+uniform vec4 uGlyphGrid;                     // grid origin (px, y up), cell size (px)
+uniform ivec4 uGlyphDims;                    // cols, rows, atlas glyphs per row, atlas rows
+uniform float uGlyphAmp;
+uniform vec3 uGlyphCol, uGlyphWarm;          // sRGB: COLORS.mid, and mid toward the ember inside 1.9 R
 out vec4 o;
 vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -33,6 +40,18 @@ void main() {
   float l = lumaOf(c);
   vec3 tinted = l * uAccent / max(lumaOf(uAccent), 1e-4);
   c = mix(c, tinted, smoothstep(0.55, 1.0, l) * uHighlightTint);
+  if (uGlyphAmp > 0.0) {   // the glyph haze: never below the lower limb (guard), dimmed by the vignette and a modal like everything else
+    vec2 g = (px - uGlyphGrid.xy) / uGlyphGrid.zw; ivec2 ci = ivec2(floor(g));
+    if (ci.x >= 0 && ci.y >= 0 && ci.x < uGlyphDims.x && ci.y < uGlyphDims.y) {
+      vec2 cell = texelFetch(uGlyphCells, ci, 0).rg;                       // (glyph / 255, light)
+      if (cell.y > 0.0) {
+        int gi = int(cell.x * 255.0 + 0.5);
+        ivec2 cs = ivec2(uGlyphGrid.zw);
+        ivec2 ap = ivec2(gi % uGlyphDims.z, uGlyphDims.w - 1 - gi / uGlyphDims.z) * cs + min(ivec2(fract(g) * uGlyphGrid.zw), cs - 1);
+        c += mix(uGlyphCol, uGlyphWarm, 1.0 - smoothstep(1.15, 1.9, rr)) * (uGlyphAmp * cell.y * texelFetch(uGlyphAtlas, ap, 0).r * guard);
+      }
+    }
+  }
   vec2 v = vUv - 0.5; c *= 1.0 - uVignette * smoothstep(0.2, 0.8, dot(v, v) * 2.0);
   c *= 1.0 - 0.5 * uDim;
   ivec2 bs = textureSize(uBlue, 0);

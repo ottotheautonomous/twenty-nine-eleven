@@ -35,8 +35,24 @@ function securityHeaders() {
   };
 }
 
+// GLSL sources (*.glsl?raw) ship without their comments: those are for the reader of the source, not the GPU (about 3 kB of the
+// bundle's gzip). Line structure is kept, so a compile error's line number still points at the source line.
+function glslWithoutComments() {
+  return {
+    name: 'glsl-without-comments',
+    enforce: 'post',
+    transform(code, id) {
+      if (!/\.glsl\?raw$/.test(id)) return null;
+      const m = /^export default ("(?:[^"\\]|\\.)*");?\s*$/s.exec(code);
+      if (!m) return null;
+      const src = JSON.parse(m[1]).replace(/\/\/[^\n]*/g, '').replace(/[ \t]+$/gm, '');
+      return { code: `export default ${JSON.stringify(src)};`, map: null };
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
   build: { target: 'es2022' },
-  plugins: [securityHeaders()],
+  plugins: [securityHeaders(), glslWithoutComments()],
 });

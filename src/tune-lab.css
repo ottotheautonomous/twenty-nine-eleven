@@ -1,0 +1,56 @@
+/* The hand lab (?tune, test builds only: imported by tune-lab.js, which a production build never emits). Tokens from style.css.
+   Fixed and out of flow: nothing on the page moves when it mounts, folds or hides. Hover and focus change colour only. */
+.tune-lab {
+  position: fixed; z-index: 8; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
+  width: 272px; max-height: calc(100svh - 32px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #2c3b3a transparent;
+  margin: 0; padding: 8px 12px 10px; border: 1px solid var(--hairline); border-radius: 4px; background: rgb(6 8 11 / .9);
+  font: 400 10.5px/1.5 'IBM Plex Mono', monospace; letter-spacing: .07em; font-variant-numeric: tabular-nums; color: var(--muted);
+  text-align: left; color-scheme: dark; touch-action: pan-y; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
+}
+.tune-head { display: flex; align-items: center; gap: 8px; height: 24px; }
+.tune-kicker { color: var(--dawn); opacity: .85; text-transform: uppercase; letter-spacing: .16em; white-space: nowrap; }
+.tune-preset { color: var(--text-2); text-transform: uppercase; letter-spacing: .12em; white-space: nowrap; }
+.tune-gap { flex: 1; }
+.tune-hint { color: var(--muted); opacity: .6; letter-spacing: 0; }
+
+.tune-lab button { min-height: 24px; margin: 0; padding: 0 8px; border: 0; border-radius: 2px; background: none; color: var(--muted);
+  font: inherit; text-transform: uppercase; letter-spacing: .12em; white-space: nowrap; touch-action: manipulation; }
+.tune-lab button:hover, .tune-lab button:focus-visible { color: var(--text); }
+.tune-lab button:focus-visible, .tune-lab input:focus-visible { outline: 1px solid var(--dawn); outline-offset: 2px; }
+.tune-lab .tune-fold { width: 24px; padding: 0; letter-spacing: 0; text-align: center; }
+
+.tune-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 4px; margin: 6px 0 4px; }
+.tune-lab .tune-chip { width: 100%; }
+.tune-lab .tune-chip[aria-pressed='true'] { color: var(--dawn); box-shadow: inset 0 -1px #FFD8A6B3; }
+
+.tune-rows { display: block; }
+.tune-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 16px 14px; align-items: center; column-gap: 8px; height: 30px; }
+.tune-name { overflow: hidden; line-height: 16px; white-space: nowrap; text-overflow: ellipsis; cursor: default; }
+.tune-val { line-height: 16px; color: #C3CDD6; text-align: right; white-space: nowrap; -webkit-user-select: text; user-select: text; }
+.tune-warn { display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--breach); vertical-align: middle; }
+.tune-row input[type='range'] { grid-column: 1 / -1; display: block; width: 100%; height: 14px; margin: 0; accent-color: var(--dawn); cursor: pointer; touch-action: pan-y; }
+.tune-row.is-off { opacity: .45; }
+.tune-row.is-off .tune-val { color: var(--muted); }
+.tune-row.is-off input[type='range'] { cursor: default; }
+
+.tune-lab .tune-more { display: block; margin: 4px 0 2px -8px; }
+.tune-lab .tune-more[aria-expanded='true'] { color: var(--text-2); }
+.tune-shelf { padding-top: 2px; border-top: 1px solid var(--rule); }
+
+/* fixed columns: COPIED / SELECT+COPY never push their neighbours */
+.tune-actions { display: grid; grid-template-columns: 56px 1fr 1fr; gap: 4px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--rule); }
+.tune-lab .tune-act { padding: 0; overflow: hidden; text-align: center; }
+.tune-lab .tune-act:first-child { text-align: left; }
+.tune-copy { grid-column: 1 / -1; width: 100%; min-height: 24px; padding: 0 6px; border: 1px solid var(--hairline); border-radius: 2px; background: var(--ink);
+  color: #C3CDD6; font: inherit; letter-spacing: 0; -webkit-user-select: text; user-select: text; }
+.tune-note { margin: 6px 0 0; font-size: 9.5px; line-height: 1.45; color: var(--muted); opacity: .7; }
+
+/* phones: full width (the body starts collapsed there and on short screens: tune-lab.js NARROW); a short landscape window keeps 272 px */
+@media (max-width: 600px) {
+  .tune-lab { width: calc(100vw - 32px); }
+}
+@media (pointer: coarse) {
+  .tune-row { grid-template-rows: 16px 24px; height: 42px; }
+  .tune-row input[type='range'] { height: 24px; }
+  .tune-lab button { min-height: 32px; }
+}

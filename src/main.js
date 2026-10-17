@@ -11,6 +11,7 @@ import { createTilt } from './tilt.js';
 import { createTouchSelect } from './touch.js';
 import { createSparkle } from './sparkle.js';
 import { createLiving, parseLiving } from './living.js';
+import { createRails } from './rails.js';
 
 // Never run inside someone else's frame (clickjacking): a meta CSP cannot set frame-ancestors on GitHub Pages.
 if (window.top !== window.self) document.documentElement.style.display = 'none';
@@ -22,6 +23,10 @@ const params = new URLSearchParams(location.search);
 // ?debug (fps readout, window.__tne) exists only in development and in test builds made with VITE_DEBUG_HOOKS=1.
 const debugHooks = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1';
 const debug = debugHooks && params.has('debug') ? Number(params.get('debug')) || 0 : -1;
+// Review knobs, test builds only: ?shield=1 (Argon's elastic shield, imported on demand), ?wordmark=still (the wordmark without its
+// camera parallax, for the owner's ruling) and the ?living=<flags> review tokens. Production reads none of them.
+const shieldOn = debugHooks && params.get('shield') === '1';
+const wordmarkStill = debugHooks && params.get('wordmark') === 'still';
 const scene = $('.scene');
 const stage = $('.stage');
 const anchor = $('.mark-anchor');
@@ -74,17 +79,19 @@ const contactSources = { hover: false, focus: false, press: false, slide: false 
 let hoverHeld = false;         // a panel opened under a hovering pointer: that hover counts again once the pointer moves
 const still = () => reducedMotion.matches || paused || params.has('still');
 
-// Living layer & row-2 cage signatures (LIVING-SPEC): active by default (all,verbs); configurable via ?living=<flags> or ?living=0.
-const livingRaw = params.get('living') ?? 'all,verbs';
+// Living layer & row-2 cage signatures (LIVING-SPEC): on by default without the lamp (exits, swell, drop, blink, verbs); ?living=<flags> or ?living=0.
+const livingRaw = (debugHooks ? params.get('living') : null) ?? 'exits,swell,drop,blink,verbs';   // the cursor lamp is benched (owner, 2026-10-16: fine-tune later); ?living=all,verbs brings it back
 const livingTokens = new Set(livingRaw.split(/[,\s]+/).filter(Boolean));
 const verbsOn = !livingTokens.has('0') && livingTokens.has('verbs');
 let lastPointerType = 'mouse';
 document.addEventListener('pointerdown', event => { lastPointerType = event.pointerType || 'mouse'; }, { capture: true, passive: true });
 document.addEventListener('pointermove', event => { lastPointerType = event.pointerType || 'mouse'; }, { capture: true, passive: true });
 
+// The rails: two silver hairlines framing the rows, in the wordmark's metal (src/rails.js; a tagline plate joins in test builds).
+const rails = createRails({ rows: [...document.querySelectorAll('.services')], words, workType: $('.work-type'), params, ease, spring: { stiffness: 95, damping: 23 } });
 // Lift the CSS entrance gate without a flash: targets start transparent inline.
 const entering = [canvas, instrument, ...words, ...document.querySelectorAll('[data-enter], .services li'), motionToggle];
-if (!still()) entering.forEach(element => { element.style.opacity = '0'; });
+if (!still()) { entering.forEach(element => { element.style.opacity = '0'; }); rails.hide(); }
 root.classList.add('entered');
 
 // Sentinel: a geodesic perimeter of light around one warm ember; the visitor's cursor is the probe.
@@ -92,6 +99,7 @@ const sentinel = createSentinel(canvas, anchor, uniforms, { debug: Math.max(0, d
 root.dataset.renderer = sentinel.type;
 const model = sentinel.model;
 model.state.entered = entered;
+if (shieldOn) import('./scene/shield.js').then((m) => sentinel.attachShield(m)).catch(() => {});
 const labels = sentinel.labels;
 // Device tilt leans the ember on phones and tablets (src/tilt.js); never on the static still. ?tiltsim (test builds only, like
 // ?debug) treats a desktop as a touch device and fakes its sensor with a pad (src/tiltsim.js).
@@ -106,9 +114,9 @@ const sparkle = createSparkle({ shell: $('.contact-trigger-shell'), trigger, lab
 const livingFlags = parseLiving(livingRaw);
 const living = livingFlags ? createLiving({ flags: livingFlags, scene, anchor, sentinel, gainK: debugHooks ? Number(params.get('livinggain')) || 1 : 1 }) : null;
 if (living) root.dataset.living = [...livingFlags].join(' ');
-if (debug >= 0 || (debugHooks && (living || verbsOn))) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose, tilt, sparkle: sparkle.debug, living };
+if (debug >= 0 || (debugHooks && (living || verbsOn || shieldOn || wordmarkStill))) window.__tne = { uniforms, scene: sentinel, model, lose: sentinel.lose, tilt, sparkle: sparkle.debug, living };
 
-const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .success h3, .success p'), {
+const textFeedback = createTextMotion(document.querySelectorAll('.service, .verse-ref, .work-type, .work-plate, .contact-trigger > span:first-child, .contact-heading h2, .email-address, .field label, .success h3, .success p'), {
   canAnimate: () => !still(),
   onActive: (element, active, event, pace) => { rowActive(element, active, event, pace); living?.lineActive(element, active); },
   ownsTouch: element => scene.contains(element),   // src/touch.js drives the scene's touch responses
@@ -129,8 +137,10 @@ const citeGlow = springValue(0, soft);
 const verseLightX = springValue('0px', soft), verseLightY = springValue('0px', soft), verseGlow = springValue(0, { stiffness: 110, damping: 24 });
 styleEffect(verseText, { '--verse-x': verseLightX, '--verse-y': verseLightY, '--verse-glow': verseGlow });
 model.state.onFrame = () => {
-  if (still()) { nameX.jump(-model.orbitNorm[0] * 6); nameY.jump(-model.orbitNorm[1] * 3); }
-  else { nameX.set(-model.orbitNorm[0] * 6); nameY.set(-model.orbitNorm[1] * 3); }   // the springs smooth the lean (a jump per frame stepped it)
+  const ox = wordmarkStill ? 0 : -model.orbitNorm[0] * 6;
+  const oy = wordmarkStill ? 0 : -model.orbitNorm[1] * 3;
+  if (still()) { nameX.jump(ox); nameY.jump(oy); }
+  else { nameX.set(ox); nameY.set(oy); }   // the springs smooth the lean (a jump per frame stepped it)
   if (integrityLive) labels.setIntegrity(model.state.integrity, model.state.deficit > 0 || uniforms.u_motion.value === 0);   // every frame while the ledger is open; at once when it is cleared for a still
 };
 model.state.onGreet = lon => { if (!still()) { ring(lon); boost('u_boostGreet', .15, .6); } };
@@ -175,9 +185,14 @@ function measureName() {
     word.style.setProperty('--word-y', y);
   }
 }
-function measure() { sentinel.measure(); measureName(); sparkle.measure(); living?.measure(); }
+// The glyph haze keeps clear of all page text (the wordmark with its parallax room): boxes in CSS px, re-measured with the layout.
+const glyphTextSel = '#company-name, .work-type, .work-plate, .services, .verse, .contact-trigger-shell, .instrument, .motion-toggle';
+function measureGlyphText() {
+  sentinel.setGlyphText([...document.querySelectorAll(glyphTextSel)].map(el => { const r = el.getBoundingClientRect(), m = el === wordmark ? 7 : 0; return [r.left - m, r.top - m, r.right + m, r.bottom + m]; }));
+}
+function measure() { sentinel.measure(); measureName(); sparkle.measure(); living?.measure(); rails.measure(); measureGlyphText(); }
 let resizeTimer = 0;
-window.addEventListener('resize', () => { measureName(); sentinel.measure(); sparkle.measure(); living?.measure(); textFeedback.refresh(); clearTimeout(resizeTimer); resizeTimer = setTimeout(() => sentinel.resize(), 120); }, { passive: true });
+window.addEventListener('resize', () => { measureName(); sentinel.measure(); sparkle.measure(); living?.measure(); rails.measure(); textFeedback.refresh(); measureGlyphText(); clearTimeout(resizeTimer); resizeTimer = setTimeout(() => sentinel.resize(), 120); }, { passive: true });
 window.addEventListener('scroll', () => sentinel.measure(), { passive: true });
 new ResizeObserver(measure).observe(stage);
 document.fonts.ready.then(measure);
@@ -265,6 +280,7 @@ if (still()) {
     animate('.verse', { opacity: [0, 1] }, { duration: .8, delay: 2.1 }),
     animate(motionToggle, { opacity: [0, .6] }, { duration: .6, delay: 2.3 }),
     animate(instrument, { opacity: [0, 1] }, { duration: .3, delay: 2.3 }),
+    ...rails.enter(),
   );
   delay(() => {
     if (still()) return;
@@ -293,6 +309,7 @@ function visitPoint(clientX, clientY, input = 'mouse', target = null) {
   set(textLightX, `${clamp((clientX - lighting.left) / Math.max(1, lighting.width)) * 100}%`);
   set(textLightY, `${clamp((clientY - lighting.top) / Math.max(1, lighting.height)) * 100}%`);
   if (input !== 'keyboard') lightVerse(clientX, clientY, verseNearness(clientX, clientY));
+  if (input !== 'keyboard') rails.point(clientX, clientY, instant);
   const shell = anchor.getBoundingClientRect();
   const distance = Math.hypot(clientX - shell.left - shell.width / 2, clientY - shell.top - shell.height / 2);
   const proximity = clamp(1 - distance / (shell.height * 1.1)) * .6;
@@ -323,6 +340,7 @@ scene.addEventListener('pointerdown', event => {
   if (event.pointerType) sparkle.pointer(event.clientX, event.clientY, event.pointerType);   // not Motion's keyboard press (a synthetic event at 0, 0)
   living?.down(event.clientX, event.clientY, event.pointerType || 'mouse', event.target, event.pointerId);
   if (event.pointerType === 'touch' && !touch.down(event)) { down = null; return; }   // a second finger: a pinch, never a tap
+  if (event.pointerType === 'touch' && !still() && entered) sentinel.glyphRipple(event.clientX, event.clientY);   // the glyph haze: one ring of re-typing from the finger
   const target = event.target.closest('[data-react]');
   setPointerElement(target);
   visitPoint(event.clientX, event.clientY, event.pointerType || 'mouse', target);
@@ -350,9 +368,12 @@ scene.addEventListener('pointerup', event => {
   if (event.pointerType === 'touch') { sparkle.leave(); touch.up(event); }   // the hand leaves; a held selection lingers (src/touch.js)
 }, { passive: true });
 function leaveHand() {
-  pointerIntent = 0; setPointerElement(null); refreshIntent(); model.leave();
+  pointerIntent = 0; setPointerElement(null); refreshIntent(); model.leave(); rails.leave(still());
   if (living?.flags.has('exits')) {   // L0: the promise's blue light and the wordmark light leave with the pointer (their own springs)
-    if (still()) { verseGlow.jump(0); textLightX.jump('50%'); textLightY.jump('45%'); } else { verseGlow.set(0); textLightX.set('50%'); textLightY.set('45%'); }
+    if (still()) { textLightX.jump('50%'); textLightY.jump('45%'); } else { textLightX.set('50%'); textLightY.set('45%'); }
+    // A held verse keeps its blue light through its linger (touch.js sets the linger right after this call): it leaves with the
+    // warmth when the selection does (the verse kind's leave below), never 650 ms ahead of it.
+    queueMicrotask(() => { if (!touch.holds(verseButton)) { if (still()) verseGlow.jump(0); else verseGlow.set(0); } });
   }
 }
 function leaveScene(event) {
@@ -389,7 +410,9 @@ function ring(lon) {
 // The verse is a control, but it answers in light alone: its hairline warms and the ember warms behind it,
 // a preview of where the verse panel will come from.
 // The promise's blue visitor light: where the pointer is (px in the phrase) and how near it is (0 far .. 1 on the words).
+let verseGlowOut = null;   // a held verse's glow leaving on the warmth's own curve (verseHoverChanged's exit); any new light stops it
 function lightVerse(clientX, clientY, near) {
+  verseGlowOut?.stop(); verseGlowOut = null;
   const rect = verseText.getBoundingClientRect();
   const instant = still();
   const set = (value, next) => instant ? value.jump(next) : value.set(next);
@@ -455,10 +478,12 @@ function rowActive(element, active, event, pace) {
     if (active) { uniforms.u_classSel.value = c; classAmpIn = animate(uniforms, { u_classAmp: 1 }, { duration: .2 }); model.rowHover(c, lon, ROW_READING[c]); rowIntent = .5; }
     else { animate(uniforms, { u_classAmp: 0 }, { duration: snap ? .125 : .4 }); model.rowHover(-1); rowIntent = 0; }
     refreshIntent();
-  } else if (verbsOn) {
-    rowTwo(element, active, theta, pace);
-  } else if (current?.name !== 'verse') {             // the open verse owns u_warm/u_tight; its closeScenery returns them to 0
-    animate(uniforms, { u_tight: active ? 1 : 0, u_warm: active ? 1 : 0 }, snap ? { duration: .19, ease: easeBack } : { duration: active ? .3 : .8, ease });
+  } else {
+    if (verbsOn) {
+      rowTwo(element, active, theta, pace);
+    } else {
+      if (current?.name !== 'verse') animate(uniforms, { u_tight: active ? 1 : 0, u_warm: active ? 1 : 0 }, snap ? { duration: .19, ease: easeBack } : { duration: active ? .3 : .8, ease });
+    }
   }
 }
 
@@ -652,10 +677,17 @@ const touch = createTouchSelect({
     },
     { match: '#open-verse', steal: true, radius: [72, 56, 96],
       enter(el) { const before = verseWarmIn; verseHoverChanged(true); awaitEntrance(el, before, verseWarmIn); },
-      leave(el, how) { verseHoverChanged(false, how); },
+      leave(el, how) {   // the blue light leaves with the warmth, on the same curve (u_warm's exit in verseHoverChanged)
+        verseHoverChanged(false, how);
+        if (current) return;
+        verseGlowOut?.stop(); verseGlowOut = null;
+        if (still()) { verseGlow.jump(0); return; }
+        verseGlowOut = animate(verseGlow.get(), 0, { ...(how === 'snap' ? { duration: .31, ease: easeBack } : { duration: .8, ease }), onUpdate: v => verseGlow.jump(v) });
+      },
       pull(el, P) { if (pullReady(el) && modalState === 'closed') setImmediateMotion(uniforms, { u_warm: .4 + .15 * P }); },   // the ember reaches
     },
     textKind('.work-type', false),   // the tagline can be held but never takes a hold: it lies between the rows and the cage
+    textKind('.work-plate', false),  // the tagline's second line answers a finger as the tagline does
   ],
   hand: {
     point: touchPoint,

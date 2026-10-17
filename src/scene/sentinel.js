@@ -5,7 +5,7 @@ import { createLabels } from './labels.js';
 import { createCanvasRenderer } from './canvas2d.js';
 import { probeGPU, createWebGLRenderer } from './webgl.js';
 import { watchContext } from './gl.js';
-import { LATTICE } from './constants.js';
+import { LATTICE, DBG } from './constants.js';
 import { createGpuTimer, createFenceLag } from './govsignal.js';
 import { createVerbs } from './verbs.js';
 
@@ -35,7 +35,8 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const query = new URLSearchParams(location.search);
   const params = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1' ? query : new URLSearchParams(query.has('still') ? 'still' : '');
   const force = params.get('gl') === 'force';
-  const probe = params.get('tier') === 'c2d' ? { ok: false } : probeGPU();
+  const isStatic = params.get('tier') === 'static';
+  const probe = params.get('tier') === 'c2d' || isStatic ? { ok: false } : probeGPU();
   let tier = pickTier(probe, params.get('tier'), force);
   const set = params.has('shape') ? Number(params.get('shape')) : LATTICE.set;
   const count = tier.name === 'c2d' ? 4096 : tier.side[0] * tier.side[1];
@@ -45,10 +46,11 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
   const labels = createLabels(readouts, instrument, shape);
   const flags = new Set((params.get('fx') || '').split(',').filter(Boolean));
   const view = { anchorX: 0, anchorY: 0, anchorH: 1, width: 1, height: 1, time: 0, debug, readout };
-  let renderer = null, glUsed = false;
+  let renderer = null, glUsed = false, shieldMod = null;
   function pick() {
+    if (isStatic) return null;
     if (tier.name !== 'c2d' && !glUsed) {
-      const r = createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags, debug });
+      const r = createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags });
       glUsed = true;                                     // a canvas that has handed out a WebGL context can never give a 2D one
       if (r) return r;
     }
@@ -56,6 +58,13 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     return createCanvasRenderer(canvas, uniforms, shape, model, { tier: TIERS.c2d });
   }
   renderer = pick();
+  let glyphText = [];   // the static text the glyph haze must not sit behind (main.js measures it)
+  const wireGlyphs = () => { renderer?.glyphs?.onDraw(() => { if (!active) drawOnce(); }); renderer?.glyphs?.setTextRects(glyphText); };
+  wireGlyphs();
+  // Test builds only (VITE_DEBUG_HOOKS=1 / dev): the hand tuning lab (?tune=1 or ?lab=1).
+  if ((import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1') && (params.has('tune') || params.has('lab'))) {
+    import('../tune-lab.js').then((m) => m.mountTuneLab({ canvas, model, uniforms, getRenderer: () => renderer, params })).catch(() => {});
+  }
   if (!renderer && tier.name !== 'c2d') tier = TIERS.c2d;
   canvas.dataset.renderer = renderer ? renderer.type : 'static';
   canvas.dataset.tier = renderer ? tier.name : 'static';
@@ -381,9 +390,11 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     gpuSamples.length = 0; timer?.poll(gpuSamples);
     const t1 = performance.now();
     timer?.begin(t1);
+    if (gov.steps.length) renderer.glyphs?.shed();   // the glyph haze lives only at the governor's top quality: its first shed fades it out for good
     renderer.draw(view, pendingDelta);
     timer?.end(); fence?.mark();
     labels.position(model.labels, model.cam);
+    renderer.glyphs?.setLabelRects(labels.rects());
     const now = performance.now(), ms = lastDrawAt ? now - lastDrawAt : 0; lastDrawAt = now;
     if (ms > 0 && ms < 250) { drawEma = drawEma * 0.9 + ms * 0.1; if (governed() || readout) pushWindow(now, ms, cpuAcc + (now - t1), gpuSamples, lag); }
     else if (ms >= 250) gov.win = null;                                     // a stall or a throttled (occluded) rAF: never part of a window
@@ -405,15 +416,17 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     if (uniforms.u_motion.value === 0 || params.has('still')) model.drawStill(view); else model.step(0, view);
     renderer.draw(view, 0);
     labels.position(model.labels, model.cam);
+    renderer.glyphs?.setLabelRects(labels.rects());
   }
   function drawOnce() { if (renderer) frame.render(drawStillFrame); }
+  if (DBG) window.__redraw = () => { if (renderer && !lost) renderer.draw(view, 0); };   // test builds: the same state redrawn, no step (FORM's split captures)
   function setActive(on) {
     on = Boolean(on && renderer && !params.has('still'));
     if (on === active) return;
     active = on;
     canvas.dataset.active = String(on);
     sinceDraw = 0; lastRaf = 0; lastDrawAt = 0; govHold(3000);             // hidden or shown: judge nothing for 3 s
-    if (on) { frame.update(updateTick, true); frame.render(renderTick, true); }
+    if (on) { model.flow.resume?.(); frame.update(updateTick, true); frame.render(renderTick, true); }   // the dust re-eases over FLOW.resume (1200 ms)
     else { cancelFrame(updateTick); cancelFrame(renderTick); drawOnce(); }
   }
 
@@ -421,9 +434,9 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     onLost() { lost = true; if (renderer) renderer.dead = true; timer = fence = null; cancelFrame(updateTick); cancelFrame(renderTick); },   // their queries died with the context
     onRestored() {
       if (renderer && !renderer.dead) renderer.destroy?.();          // a dead renderer's objects died with the context
-      renderer = createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags, debug }) || null;
+      renderer = createWebGLRenderer(canvas, uniforms, shape, model, { tier, probe, flags }) || null;
       canvas.dataset.renderer = renderer ? renderer.type : 'static';
-      if (renderer) { renderer.setRows?.(rows); renderer.setQuality?.(quality); }
+      if (renderer) { renderer.setRows?.(rows); renderer.setQuality?.(quality); if (shieldMod) renderer.attachShield?.(shieldMod); wireGlyphs(); }
       attachSignals();
       lost = false; resize();
       if (active) { active = false; setActive(true); } else drawOnce();
@@ -441,6 +454,7 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
 
   return {
     get type() { return renderer ? renderer.type : 'static'; },
+    get debugRenderer() { return import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1' ? renderer : null; },   // test builds: probes read the renderer's own counters
     get tier() { return tier.name; },
     model, labels, shape,
     measure, resize: () => { resize(); measure(); }, setActive, drawOnce,
@@ -448,6 +462,11 @@ export function createSentinel(canvas, anchorEl, uniforms, { debug = 0, readout 
     enableSimulationAt(sec) { simAt = sec; },
     fluidPointer(u, v, t) { renderer?.fluid?.pointer(u, v, t); },
     whenReady(cb) { if (readyFired) cb(); else readyCbs.push(cb); },
+    // The glyph haze: static text boxes (CSS px [x0, y0, x1, y1]) to keep clear, and a touchdown's ring of re-typing (CSS px).
+    setGlyphText(rects) { glyphText = rects; renderer?.glyphs?.setTextRects(rects); },
+    glyphRipple(x, y) { const sx = canvas.width / Math.max(1, canvas.clientWidth || innerWidth), sy = canvas.height / Math.max(1, canvas.clientHeight || innerHeight); renderer?.glyphs?.ripple(x * sx, canvas.height - y * sy, view.time * 1000); },
+    // Test builds only (main.js imports shield.js for ?shield=1): Argon's elastic shield joins the model and the renderer on demand.
+    attachShield: import.meta.env.DEV || import.meta.env.VITE_DEBUG_HOOKS === '1' ? (m) => { shieldMod = m; model.state.shield = m.createShieldModel(); model.state.shield.on = true; renderer?.attachShield?.(m); } : undefined,
     lose() {
       const ext = renderer?.gl?.getExtension('WEBGL_lose_context');
       if (!ext) return false;
